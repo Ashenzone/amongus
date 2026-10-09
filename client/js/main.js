@@ -36,7 +36,8 @@ async function enter(kind, extra = {}) {
 $('nameIn').value = P.name;
 $('mPlay').onclick = () => enter('quick'); $('mCreate').onclick = () => enter('create'); $('mJoin').onclick = () => { initAudio(); go('join'); $('codeIn').focus(); };
 $('jGo').onclick = () => { const code = $('codeIn').value.trim().toUpperCase(); code.length === 4 ? enter('join', { code }) : UI.toast('Digite o código de 4 letras.'); };
-$('codeIn').onkeydown = e => e.key === 'Enter' && $('jGo').click();
+$('codeIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('jGo').click(); });
+$('codeIn').addEventListener('input', e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); });
 $('mCustom').onclick = $('lCustom').onclick = () => { initAudio(); UI.initCustom(P.look, look => { P.look = look; save(); inLobby() && send({ t: 'look', look, name: P.name }); sfx('ok'); back(); }); go('custom'); };
 $('mSettings').onclick = () => { initAudio(); UI.initSettings(P, save); go('settings'); };
 document.querySelectorAll('[data-back]').forEach(b => b.onclick = back);
