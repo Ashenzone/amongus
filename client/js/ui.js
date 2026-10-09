@@ -1,0 +1,149 @@
+// Telas DOM: menus, lobby, personalização, configurações, reunião e fim de partida.
+import { drawCrew, setQuality } from './render.js';
+import { COLORS, HATS, OUTFITS, ACCS, MASCOTS, SKINS } from '/shared/cosmetics.js';
+import { sfx, setVol, A } from './audio.js';
+import { JOBS, JOB, PARAMS, TEAMS, SETTING_LIMITS } from '/shared/jobs.js';
+const $ = id => document.getElementById(id);
+const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+
+export function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id)); }
+let tt = 0; export function toast(msg, ms = 2600) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), ms); }
+
+// ---------- animação de vitrine (lobby / personalização) ----------
+let animFn = null, raf = 0;
+function loop(t) { animFn && animFn(t / 1000); raf = requestAnimationFrame(loop); }
+export function setAnim(fn) { animFn = fn; if (fn && !raf) raf = requestAnimationFrame(loop); if (!fn) { cancelAnimationFrame(raf); raf = 0; } }
+
+// ---------- lobby ----------
+const SET = [['impostors', 'Infiltrados', 0, 3, 1, v => v || 'Auto'], ['speed', 'Velocidade', 0.75, 1.5, 0.25, v => v + 'x'], ['vision', 'Visão', 0.5, 1.5, 0.25, v => v + 'x'],
+  ['discuss', 'Tempo de discussão', 10, 120, 5, v => v + 's'], ['vote', 'Tempo de votação', 10, 120, 5, v => v + 's'], ['tasks', 'Tarefas por jogador', 1, 8, 1, v => v],
+  ['killCd', 'Recarga da eliminação', 10, 45, 1, v => v + 's'], ['emergencies', 'Reuniões de emergência', 0, 3, 1, v => v], ['confirm', 'Revelar função do expulso', 0, 1, 1, v => (v ? 'Sim' : 'Não')]];
+let LB = null;
+export function renderLobby(L, myId, send, minPlayers = 4) {
+  LB = L; renderJobs(L, myId, send); const host = L.host === myId; $('lCode').textContent = L.code;
+  $('lCount').textContent = `${L.players.length}/15 jogadores · mínimo ${minPlayers}`;
+  const box = $('lSet'); box.innerHTML = '';
+  for (const [k, label, min, max, step, fmt] of SET) {
+    const w = el('div', 'set'); const b = el('b', null, fmt(L.settings[k])); w.append(el('span', null, label), b);
+    const r = el('input'); r.type = 'range'; r.min = min; r.max = max; r.step = step; r.value = L.settings[k]; r.disabled = !host;
+    r.oninput = () => b.textContent = fmt(+r.value); r.onchange = () => send({ t: 'set', k, v: +r.value }); w.append(r); box.append(w);
+  }
+  const p = el('label', 'set'); p.append(el('span', null, 'Sala pública (aparece em JOGAR)')); const c = el('input'); c.type = 'checkbox'; c.checked = L.pub; c.disabled = !host; c.onchange = () => send({ t: 'set', k: 'pub', v: c.checked }); p.append(c); box.append(p);
+  $('lStart').disabled = !host || L.players.length < minPlayers; $('lStart').textContent = host ? 'COMEÇAR' : 'AGUARDANDO O DONO';
+}
+export function drawStage() {
+  const cv = $('stage'), c = cv.getContext('2d'), w = cv.width, h = cv.height; c.clearRect(0, 0, w, h);
+  const g = c.createRadialGradient(w / 2, h, 20, w / 2, h, w * 0.6); g.addColorStop(0, 'rgba(45,226,197,.22)'); g.addColorStop(1, 'rgba(45,226,197,0)'); c.fillStyle = g; c.fillRect(0, 0, w, h);
+  if (!LB) return; const ps = LB.players, rows = ps.length > 8 ? 2 : 1, per = Math.ceil(ps.length / rows), t = performance.now() / 1000;
+  ps.forEach((p, i) => {
+    const row = Math.floor(i / per), idx = i % per, cnt = Math.min(per, ps.length - row * per), x = (w / (cnt + 1)) * (idx + 1), y = rows === 1 ? 250 : 170 + row * 150, s = rows === 1 ? 2.2 : 1.6;
+    drawCrew(c, p.look, x, y + Math.max(0, Math.sin(t * 2 + i)) * -4, { t: t + i, s, alpha: p.dc ? 0.4 : 1 });
+    c.fillStyle = '#e9f1ff'; c.font = '700 18px "Baloo 2",sans-serif'; c.textAlign = 'center'; c.fillText((p.id === LB.host ? '👑 ' : '') + p.name, x, y + 26);
+  });
+}
+
+// ---------- personalização ----------
+const ROWS = [['Chapéu', 'h', HATS], ['Roupa', 'o', OUTFITS], ['Acessório', 'a', ACCS], ['Mascote', 'm', MASCOTS], ['Skin', 's', SKINS]];
+let draft = null;
+export function initCustom(look, onSave) {
+  draft = { ...look }; const box = $('cOpts'); box.innerHTML = '';
+  const cr = el('div', 'opt'); cr.append(el('label', null, 'Cor')); const sw = el('div', 'sw');
+  COLORS.forEach((col, i) => { const d = el('i'); d.style.background = col; d.className = i === draft.c ? 'on' : ''; d.onclick = () => { draft.c = i; sw.querySelectorAll('i').forEach((x, j) => x.classList.toggle('on', j === i)); sfx('click'); }; sw.append(d); }); cr.append(sw); box.append(cr);
+  for (const [label, k, arr] of ROWS) {
+    const r = el('div', 'opt'), v = el('span', 'v', arr[draft[k]]), mk = d => { const b = el('button', null, d < 0 ? '‹' : '›'); b.onclick = () => { draft[k] = (draft[k] + d + arr.length) % arr.length; v.textContent = arr[draft[k]]; sfx('click'); }; return b; };
+    r.append(el('label', null, label), mk(-1), v, mk(1)); box.append(r);
+  }
+  $('cSave').onclick = () => onSave({ ...draft });
+}
+export function drawPrev() { const cv = $('prev'), c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); if (draft) drawCrew(c, draft, 170, 250, { t: performance.now() / 1000, s: 3.2 }); }
+
+// ---------- configurações ----------
+export function initSettings(P, save) {
+  const box = $('sOpts'); box.innerHTML = '';
+  for (const [k, label] of [['master', 'Volume geral'], ['music', 'Música'], ['sfx', 'Efeitos']]) {
+    const w = el('div', 'set'); w.append(el('span', null, label)); const r = el('input'); r.type = 'range'; r.min = 0; r.max = 1; r.step = 0.05; r.value = A.vol[k]; r.oninput = () => { setVol(k, +r.value); P.vol = { ...A.vol }; save(); }; w.append(r); box.append(w);
+  }
+  const q = el('div', 'set'); q.append(el('span', null, 'Qualidade gráfica')); const s = el('select'); ['Baixa', 'Média', 'Alta'].forEach((n, i) => { const o = el('option', null, n); o.value = i; s.append(o); }); s.value = P.q; s.onchange = () => { P.q = +s.value; setQuality(P.q); save(); }; q.append(s); box.append(q);
+  const f = el('button', 'btn', 'TELA CHEIA'); f.onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); box.append(f);
+}
+
+// ---------- reunião ----------
+const M = { sel: null, voted: false, phase: 'meet', cards: new Map(), ctx: null, t0: 0, dur: 1, iv: 0 };
+export function openMeeting(m, ctx) {
+  Object.assign(M, { sel: null, voted: false, phase: 'meet', ctx, t0: performance.now(), dur: m.time * 1000 }); M.cards.clear();
+  $('eject').classList.remove('on'); $('chLog').innerHTML = ''; show('meeting');
+  const by = ctx.roster.get(m.by)?.name || '?'; $('mTitle').textContent = m.reason === 'body' ? `${by} encontrou um corpo!` : `${by} chamou uma reunião de emergência`;
+  const list = $('mList'); list.innerHTML = '';
+  for (const [id, p] of ctx.roster) {
+    const dead = !m.alive.includes(id), card = el('div', 'card2' + (dead ? ' dead' : '')), cv = el('canvas'); cv.width = 100; cv.height = 120;
+    drawCrew(cv.getContext('2d'), p.look, 50, 108, { s: 1.5, ghost: dead, alpha: dead ? 0.6 : 1, dead });
+    card.append(cv, el('div', 'nm', p.name), el('div', 'vs'));
+    card.onclick = () => { if (M.phase !== 'vote' || dead || M.voted || !ctx.alive) return; M.sel = id; M.cards.forEach(c => c.classList.remove('sel')); card.classList.add('sel'); $('mVote').disabled = false; sfx('click'); };
+    M.cards.set(id, card); list.append(card);
+  }
+  $('mVote').disabled = true; $('mSkip').disabled = true;
+  $('mNote').textContent = ctx.alive ? 'Discussão: converse e levante suspeitas.' : 'Você é um fantasma: só outros fantasmas veem seu chat.';
+  clearInterval(M.iv); M.iv = setInterval(() => { $('mBar').style.transform = `scaleX(${Math.max(0, 1 - (performance.now() - M.t0) / M.dur)})`; }, 100);
+}
+export function startVote(time) {
+  M.phase = 'vote'; M.t0 = performance.now(); M.dur = time * 1000; $('mTitle').textContent = 'Quem é o infiltrado? Vote!';
+  const can = M.ctx.alive && !M.voted; $('mSkip').disabled = !can; $('mNote').textContent = can ? 'Selecione um jogador e confirme, ou pule o voto.' : '';
+}
+export function lockVote() { M.voted = true; $('mVote').disabled = true; $('mSkip').disabled = true; $('mNote').textContent = 'Voto registrado. Aguardando os demais…'; }
+export const selectedVote = () => M.sel;
+export function markVoted(id) { const c = M.cards.get(id); if (c && !c.querySelector('.chip')) c.append(el('span', 'chip', '✓')); }
+export function addChat(m, roster) {
+  const p = roster.get(m.id), l = $('chLog'), row = el('p', m.dead ? 'ghost' : ''); const b = el('b', null, (p?.name || '?') + ':'); b.style.color = COLORS[p?.look.c] || '#fff'; row.append(b, document.createTextNode(m.text)); l.append(row); l.scrollTop = l.scrollHeight; if (l.children.length > 80) l.firstChild.remove();
+}
+export function showResult(m, roster) {
+  M.phase = 'result'; $('mVote').disabled = true; $('mSkip').disabled = true; $('mTitle').textContent = 'Resultado da votação'; M.t0 = performance.now(); M.dur = m.time * 1000;
+  for (const [tid, voters] of Object.entries(m.votes)) { const vs = M.cards.get(+tid)?.querySelector('.vs'); voters.forEach(v => { const d = el('i'); d.style.background = COLORS[roster.get(v)?.look.c] || '#fff'; vs?.append(d); }); }
+  $('mNote').textContent = m.skip.length ? `Votos pulados: ${m.skip.length}` : '';
+  setTimeout(() => {
+    const e = $('eject'), p = roster.get(m.ejected); e.innerHTML = '';
+    if (p) { e.append(el('div', null, `${p.name} foi ejetado(a)${m.supreme ? ' pelo Voto Supremo' : ''}.`)); if (m.imp !== null) e.append(el('div', null, m.imp ? 'Era um infiltrado.' : 'Não era um infiltrado.')); if (m.left != null) e.append(el('small', null, `Restam ${m.left} infiltrado(s).`)); sfx('eject'); }
+    else e.append(el('div', null, 'Ninguém foi ejetado.'), el('small', null, 'Empate ou votos pulados.'));
+    e.classList.add('on');
+  }, 2200);
+}
+export function closeMeeting() { clearInterval(M.iv); $('eject').classList.remove('on'); }
+
+// ---------- profissões (configuração do host) ----------
+let jtab = 'inn';
+export function renderJobs(L, myId, send) {
+  const host = L.host === myId, tabs = $('jTabs'), body = $('jBody'); tabs.innerHTML = ''; body.innerHTML = '';
+  for (const [k, label] of [['inn', '🔵 Inocentes'], ['neu', '🟣 Neutros'], ['imp', '🔴 Impostores'], ['rules', '⚙ Regras']]) { const b = el('button', 'btn' + (jtab === k ? ' main' : ''), label); b.onclick = () => { jtab = k; renderJobs(L, myId, send); }; tabs.append(b); }
+  const slider = (label, k, min, max, step, fmt) => { const w = el('div', 'set'), b = el('b', null, fmt(L.settings[k])); w.append(el('span', null, label), b); const r = el('input'); r.type = 'range'; r.min = min; r.max = max; r.step = step; r.value = L.settings[k]; r.disabled = !host; r.oninput = () => b.textContent = fmt(+r.value); r.onchange = () => send({ t: 'set', k, v: +r.value }); w.append(r); return w; };
+  if (jtab === 'rules') {
+    const g = el('div', 'jrow'); g.style.gridColumn = '1/3'; g.append(el('small', null, 'Quantidade de neutros e de impostores. Impostores em “Auto” segue 1/2/3 por tamanho da sala.'), slider('Neutros na partida', 'neutrals', 0, 4, 1, v => v), slider('Impostores (0 = Auto)', 'impostors', 0, 3, 1, v => v || 'Auto')); body.append(g);
+    let last = ''; for (const p of PARAMS) { if (p.grp !== last) { body.append(el('div', 'jgrp', p.grp.toUpperCase())); last = p.grp; } const r = el('div', 'jrow'); r.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); body.append(r); }
+    return;
+  }
+  for (const j of JOBS.filter(x => x.team === jtab)) {
+    const row = el('div', 'jrow'), nm = el('b', null, j.name + (j.id === 'mentalista' ? ' ⚫' : '')); nm.style.color = j.color === '#111419' ? '#e9f1ff' : j.color;
+    row.append(nm, el('small', null, j.desc + (j.ghost ? ' (só recebida após morrer)' : '')), slider(j.ghost ? 'Chance ao morrer' : 'Chance de aparecer', 'w_' + j.id, 0, 100, 5, v => v + '%'));
+    if (j.id !== 'tripulante') row.append(slider('Máximo de jogadores', 'm_' + j.id, 0, SETTING_LIMITS['m_' + j.id][1], 1, v => v)); body.append(row);
+  }
+}
+// ---------- seleção de jogador / mensagem / painel ----------
+export function pick(title, items, cb) {
+  const p = $('pick'), l = $('pkL'); $('pkT').textContent = title; l.innerHTML = '';
+  for (const it of items) { const b = el('button', 'pk'), cv = el('canvas'); cv.width = 44; cv.height = 52; drawCrew(cv.getContext('2d'), it.look, 22, 46, { s: 0.9 }); b.append(cv, el('span', null, it.name + (it.note ? ' — ' + it.note : ''))); if (cb) b.onclick = () => { p.classList.remove('on'); sfx('click'); cb(it.id); }; else b.disabled = true; l.append(b); }
+  $('pkX').onclick = () => p.classList.remove('on'); p.classList.add('on');
+}
+export function pickText(title, opts, cb) {
+  const p = $('pick'), l = $('pkL'); $('pkT').textContent = title; l.innerHTML = '';
+  for (const o of opts) { const b = el('button', 'pk', o.label); b.onclick = () => { p.classList.remove('on'); sfx('click'); cb(o.id); }; l.append(b); }
+  $('pkX').onclick = () => p.classList.remove('on'); p.classList.add('on');
+}
+
+// ---------- fim ----------
+const WIN = { crew: ['EQUIPE VENCEU', '#2de2c5', 'rgba(20,90,80,.8)'], imp: ['IMPOSTORES VENCERAM', '#ff4f6d', 'rgba(110,15,40,.8)'], joker: ['JOKER VENCEU', '#c3c9d6', 'rgba(70,74,90,.85)'], exec: ['EXECUTION VENCEU', '#ff8a1f', 'rgba(120,60,10,.85)'] };
+export function showEnd(m, roster, me) {
+  const [title, col, bg] = WIN[m.winner] || WIN.crew, t = $('eTitle'); t.textContent = title; t.style.color = col; t.style.textShadow = `0 0 40px ${col}`;
+  $('eReason').textContent = m.reason; const l = $('eList'); l.innerHTML = '';
+  for (const [id, role, alive, job] of m.roles) { const p = roster.get(id), J = JOB[job], d = el('div', role === 'imp' ? 'imp' : '', `${p?.name || '?'} · `); const s = el('b', null, J?.name || '?'); s.style.color = J?.color === '#111419' ? '#e9f1ff' : J?.color; d.append(s, document.createTextNode(alive ? '' : ' ☠')); l.append(d); }
+  $('end').style.background = `radial-gradient(circle,${bg},rgba(4,8,18,.96))`; show('end');
+  const won = m.winner === 'crew' ? me.team !== 'imp' && !['joker', 'execution'].includes(me.job) : m.winner === 'imp' ? me.team === 'imp' : m.winner === 'joker' ? me.job === 'joker' : me.job === 'execution';
+  sfx(won ? 'win' : 'lose');
+}
