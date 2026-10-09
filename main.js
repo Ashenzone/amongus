@@ -1,0 +1,272 @@
+// Orquestra tudo: perfil, rede, estado do jogo, entrada, HUD e loop principal.
+import { net } from './net.js';
+import { initRender, render, R, fx, addShake, setQuality } from './render.js';
+import { initAudio, A, sfx, alarm } from './audio.js';
+import { openTask, TASK_MIN } from './tasks.js';
+import * as UI from './ui.js';
+import { ROOMS, RECTS, STATIONS, VENTS, SPECIAL, canStand, WORLD } from '/shared/map.js';
+import { sanitizeName } from '/shared/cosmetics.js';
+import { JOB, TEAMS, ABIL, INF_MSGS } from '/shared/jobs.js';
+
+const $ = id => document.getElementById(id);
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const P = Object.assign({ name: '', look: { c: Math.floor(Math.random() * 12), h: 0, o: 0, a: 0, m: 0, s: 0 }, vol: { ...A.vol }, q: 1 }, JSON.parse(localStorage.getItem('quorum.p') || '{}'));
+const save = () => localStorage.setItem('quorum.p', JSON.stringify(P));
+Object.assign(A.vol, P.vol); setQuality(P.q);
+
+const S = { phase: 'menu', id: null, roster: new Map(), role: null, mates: new Set(), me: { x: SPECIAL.spawn.x, y: SPECIAL.spawn.y, alive: false, vent: -1, moving: false, face: 1 },
+  players: new Map(), bodies: [], myTasks: [], sab: null, vr: 900, look: P.look, name: P.name, acting: 0, cd: [0, 0], intro: 0, tk: [0, 1], settings: { speed: 1, emergencies: 1 },
+  emergUsed: 0, hideMe: true, lobby: null, onDoor: () => sfx('door'), job: null, team: null, ghostJob: null, target: null, known: new Map(), ab: { cd: {}, act: {}, us: {}, sup: 0 }, arrows: [], loc: null, probe: null, meInv: false, meShield: 0, sup: 0, supMode: false, _ej: null };
+const send = o => net.send(o);
+initRender($('game'));
+
+// ---------- navegação ----------
+function go(id) {
+  UI.show(id); A.mode = id === null ? 'game' : 'lobby';
+  UI.setAnim(id === 'lobby' ? UI.drawStage : id === 'custom' ? UI.drawPrev : null);
+}
+const inLobby = () => S.phase === 'lobby';
+const back = () => go(inLobby() ? 'lobby' : 'menu');
+function toMenu(msg) { S.phase = 'menu'; S.hideMe = true; S.me.alive = false; $('hud').classList.add('hide'); closeTaskUi(); alarm(false); sessionStorage.removeItem('quorum.s'); go('menu'); msg && UI.toast(msg); }
+async function enter(kind, extra = {}) {
+  initAudio(); P.name = sanitizeName($('nameIn').value); $('nameIn').value = P.name; save();
+  try { await net.connect(); } catch { return UI.toast('Não foi possível conectar ao servidor.'); }
+  send({ t: kind, name: P.name, look: P.look, ...extra });
+}
+$('nameIn').value = P.name;
+$('mPlay').onclick = () => enter('quick'); $('mCreate').onclick = () => enter('create'); $('mJoin').onclick = () => { initAudio(); go('join'); $('codeIn').focus(); };
+$('jGo').onclick = () => { const code = $('codeIn').value.trim().toUpperCase(); code.length === 4 ? enter('join', { code }) : UI.toast('Digite o código de 4 letras.'); };
+$('codeIn').onkeydown = e => e.key === 'Enter' && $('jGo').click();
+$('mCustom').onclick = $('lCustom').onclick = () => { initAudio(); UI.initCustom(P.look, look => { P.look = look; save(); inLobby() && send({ t: 'look', look, name: P.name }); sfx('ok'); back(); }); go('custom'); };
+$('mSettings').onclick = () => { initAudio(); UI.initSettings(P, save); go('settings'); };
+document.querySelectorAll('[data-back]').forEach(b => b.onclick = back);
+$('lJobs').onclick = () => go('jobs');
+$('lLeave').onclick = () => { send({ t: 'leave' }); toMenu(); };
+$('lStart').onclick = () => send({ t: 'start' });
+$('mVote').onclick = () => { const to = UI.selectedVote(); if (to != null) { send({ t: 'vote', to, sup: S.supMode ? 1 : 0 }); S.supMode = false; $('mSup').hidden = true; UI.lockVote(); } };
+$('mSup').onclick = () => { S.supMode = !S.supMode; $('mSup').classList.toggle('main', S.supMode); UI.toast(S.supMode ? 'Voto Supremo armado: o jogador escolhido será ejetado.' : 'Voto Supremo desarmado.'); };
+$('mSkip').onclick = () => { send({ t: 'vote', to: 'skip' }); UI.lockVote(); };
+const sendChat = () => { const i = $('chIn'), text = i.value.trim(); if (text) send({ t: 'chat', text }); i.value = ''; };
+$('chSend').onclick = sendChat; $('chIn').onkeydown = e => { if (e.key === 'Enter') sendChat(); e.stopPropagation(); };
+addEventListener('pointerdown', () => initAudio(), { once: true });
+
+// ---------- mensagens do servidor ----------
+net.on('hello', m => { S.id = m.id; sessionStorage.setItem('quorum.s', JSON.stringify({ code: m.code, token: m.token })); });
+net.on('err', m => UI.toast(m.msg));
+net.on('norejoin', () => sessionStorage.removeItem('quorum.s'));
+net.on('lobby', m => {
+  S.lobby = m; S.roster = new Map(m.players.map(p => [p.id, p]));
+  if (S.phase !== 'lobby') { S.phase = 'lobby'; S.hideMe = true; S.me.alive = false; $('hud').classList.add('hide'); closeTaskUi(); alarm(false); UI.closeMeeting(); go('lobby'); }
+  UI.renderLobby(m, S.id, send, m.min);
+});
+function begin(m, resume) {
+  S.phase = 'play'; S.role = m.role; S.mates = new Set(m.mates.map(x => x[0])); S.known = new Map(m.mates); S.job = m.job; S.team = m.team; S.ghostJob = m.ghostJob; S.target = m.target; S.sup = m.sup || 0; S.supMode = false; S.arrows = []; S.loc = null; S._ej = null; S.roster = new Map(m.players.map(p => [p.id, p])); S.myTasks = m.tasks.map(t => ({ ...t }));
+  Object.assign(S.me, { x: m.x, y: m.y, alive: m.alive !== false, vent: -1, moving: false }); S.players.clear(); S.bodies = []; S.sab = null; S.emergUsed = m.emergUsed || 0; S.settings = m.settings;
+  const mine = S.roster.get(S.id); S.look = mine.look; S.name = mine.name; S.hideMe = false; S.vr = 420; R.cam.x = m.x; R.cam.y = m.y; R.vis = 420;
+  go(null); $('hud').classList.remove('hide'); $('sabMenu').classList.add('hide');
+  const imp = S.role === 'imp'; document.querySelectorAll('#bSab,#bKill').forEach(b => b.classList.toggle('hide', !imp)); $('bigmap').classList.add('hide');
+  if (!resume) intro();
+  hudTasks(); buildAbil();
+}
+net.on('start', m => begin(m, false));
+net.on('resume', m => { begin(m, true); if (m.phase !== 'play') { $('hud').classList.add('hide'); S.phase = m.phase; UI.toast('Reconectado. Aguarde a próxima fase.'); } else UI.toast('Reconectado!'); });
+function intro() {
+  const e = $('intro'), T = TEAMS[S.team], J = JOB[S.job], col = J.color === '#111419' ? '#e9f1ff' : J.color; e.innerHTML = ''; e.classList.add('on');
+  const scene = (big, color, small, bar) => { e.innerHTML = ''; const h = document.createElement('div'); h.textContent = big; h.style.color = color; h.style.textShadow = `0 0 40px ${color}`; e.append(h); if (bar) { const l = document.createElement('div'); l.className = 'ldbar'; l.append(document.createElement('i')); e.append(l); } if (small) { const s = document.createElement('small'); s.textContent = small; e.append(s); } };
+  scene('CARREGANDO', '#e9f1ff', 'Preparando a Estação Halcyon…', true);
+  setTimeout(() => { scene(`${T.icon} ${T.name.toUpperCase()}`, T.color, ''); sfx(S.team === 'imp' ? 'sabotage' : 'click'); }, 1100);
+  setTimeout(() => {
+    let extra = J.desc; if (S.team === 'imp') { const al = [...S.known].filter(([i]) => i !== S.id).map(([i, j]) => `${S.roster.get(i)?.name} (${JOB[j].name})`); if (al.length) extra += ` Aliados: ${al.join(', ')}.`; }
+    if (S.job === 'execution') extra += ` Seu alvo: ${S.roster.get(S.target)?.name || '?'}.`; scene(J.name.toUpperCase(), col, extra); sfx('ok');
+  }, 2300);
+  setTimeout(() => e.classList.remove('on'), 4100);
+}
+net.on('snap', m => {
+  if (S.phase !== 'play') return;
+  const [x, y, vent, ap, inv, sh] = m.you, me = S.me, d = Math.hypot(x - me.x, y - me.y); me.vent = vent; S.meInv = !!inv; S.meShield = sh; { const mr = S.roster.get(ap); if (mr) { S.look = mr.look; S.name = mr.name; } }
+  if (d > 120 || vent >= 0) { me.x = x; me.y = y; } else if (d > 36) { me.x += (x - me.x) * 0.15; me.y += (y - me.y) * 0.15; } else if (!me.moving) { me.x += (x - me.x) * 0.3; me.y += (y - me.y) * 0.3; }
+  const seen = new Set();
+  for (const [id, px, py, f, mv, g, ap, iv] of m.pl) {
+    seen.add(id); let p = S.players.get(id); if (!p) { p = { x: px, y: py }; S.players.set(id, p); }
+    const r = S.roster.get(ap ?? id) || { name: '?', look: P.look }; Object.assign(p, { look: r.look, name: r.name, tx: px, ty: py, face: f, moving: !!mv, ghost: !!g, inv: !!iv });
+  }
+  for (const id of [...S.players.keys()]) if (!seen.has(id)) S.players.delete(id);
+  S.bodies = m.bd.map(([id, bx, by, bg]) => ({ id, x: bx, y: by, g: !!bg, look: (S.roster.get(id) || { look: P.look }).look }));
+  const hadSab = S.sab; S.sab = m.sab; S.vr = m.vr; S.cd = m.cd || [0, 0]; S.tk = m.tk; S.intro = m.intro; S.ab = m.ab; S.loc = m.loc; S.probe = m.probe; S.sup = m.ab.sup;
+  S.arrows = [...m.ar.map(([ax, ay]) => ({ x: ax, y: ay, col: '#ff4f6d' })), ...(m.loc ? [{ x: m.loc[0], y: m.loc[1], col: '#ffd23d' }] : [])];
+  if (!!hadSab !== !!S.sab || hadSab?.k !== S.sab?.k) alarm(S.sab?.k === 'heat');
+});
+net.on('taskOk', m => { const t = S.myTasks.find(q => q.id === m.id); if (t) t.done = true; hudTasks(); });
+net.on('fx', m => { const r = S.roster.get(m.id); if (!r) return; R.dying.push({ x: m.x, y: m.y, look: r.look, t: 0 }); fx(m.k, m.x, m.y, m.k === 'killg' ? '#4fd36b' : '#ff4f6d'); sfx('kill'); });
+net.on('died', () => { S.me.alive = false; closeTaskUi(); S.arrows = []; S.loc = null; buildAbil(); UI.toast(S.role === 'imp' ? 'Você foi expulso. Continue como fantasma.' : 'Você foi eliminado. Agora você é um fantasma.'); });
+net.on('sab', m => { sfx(m.k === 'lights' ? 'blackout' : 'sabotage'); addShake(8); });
+net.on('sabPart', () => sfx('fixed'));
+net.on('sabEnd', () => { sfx('fixed'); UI.toast('Sistema restaurado.'); });
+net.on('meeting', m => {
+  S.phase = 'meet'; closeTaskUi(); alarm(false); S.sab = null; S.bodies = []; $('hud').classList.add('hide'); $('intro').classList.remove('on'); sfx(m.reason === 'body' ? 'report' : 'meeting'); addShake(6);
+  UI.openMeeting(m, { roster: S.roster, alive: S.me.alive }); S.arrows = []; S.loc = null; S.supMode = false; $('mSup').hidden = true; $('bigmap').classList.add('hide'); buildMeetAb();
+});
+net.on('phase', m => { S.phase = 'vote'; UI.startVote(m.time); sfx('vote'); $('mSup').hidden = !(S.sup > 0 && S.me.alive); $('mSup').classList.remove('main'); });
+net.on('voted', m => { UI.markVoted(m.id); sfx('click'); });
+net.on('chat', m => UI.addChat(m, S.roster));
+net.on('result', m => { S.phase = 'result'; UI.showResult(m, S.roster); });
+net.on('play', () => { S.phase = 'play'; UI.closeMeeting(); go(null); $('hud').classList.remove('hide'); S.players.clear(); S.hideMe = false; sfx('ok'); S._ej = null; buildAbil(); });
+net.on('end', m => { S.phase = 'end'; closeTaskUi(); alarm(false); $('hud').classList.add('hide'); A.mode = null; UI.showEnd(m, S.roster, { team: S.team, job: S.job }); $('bigmap').classList.add('hide'); });
+net.on('close', () => {
+  if (S.phase === 'menu') return; const s = JSON.parse(sessionStorage.getItem('quorum.s') || 'null'); if (!s) return toMenu('Conexão encerrada.');
+  UI.toast('Conexão perdida. Reconectando…'); let n = 0;
+  const retry = async () => { if (++n > 20) return toMenu('Não foi possível reconectar.'); try { await net.connect(); send({ t: 'rejoin', code: s.code, token: s.token }); } catch { setTimeout(retry, 2000); } };
+  retry();
+});
+{ const s = JSON.parse(sessionStorage.getItem('quorum.s') || 'null'); if (s) net.connect().then(() => send({ t: 'rejoin', code: s.code, token: s.token })).catch(() => { }); }
+
+// ---------- entrada ----------
+const keys = new Set(); let closeTask = null, lastIn = '', inT = 0;
+const closeTaskUi = () => { closeTask?.(false); closeTask = null; };
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return; keys.add(e.code); if (S.phase !== 'play' || closeTask || S.intro > 0) return;
+  ({ Digit1: () => abilN(0), Digit2: () => abilN(1), Digit3: () => abilN(2), Digit4: () => abilN(3), KeyM: toggleMap, KeyE: doUse, KeyR: doReport, KeyQ: doKill, KeyV: doVent, KeyC: () => S.me.vent >= 0 && send({ t: 'vent', a: 'next' }), KeyF: () => S.role === 'imp' && $('sabMenu').classList.toggle('hide') })[e.code]?.();
+});
+addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
+$('bUse').onclick = () => doUse(); $('bRep').onclick = () => doReport(); $('bKill').onclick = () => doKill(); $('bVent').onclick = () => doVent(); $('bSab').onclick = () => $('sabMenu').classList.toggle('hide');
+$('sabMenu').onclick = e => { const k = e.target.dataset.s; if (k) { send({ t: 'sabotage', k }); $('sabMenu').classList.add('hide'); } };
+
+// ---------- ações contextuais ----------
+function nearAction() {
+  const me = S.me; if (S.phase !== 'play' || me.vent >= 0) return null;
+  if (me.alive && S.sab) {
+    const k = S.sab.k, fix = (id, pt) => dist(me, pt) < 90 && { label: 'REPARAR', run: () => { S.acting = 1; sfx('click'); setTimeout(() => dist(S.me, pt) < 110 && send({ t: 'fix', id }), 1000); } };
+    if (k === 'lights') { const f = fix('lights', SPECIAL.lights); if (f) return f; }
+    if (k === 'comms') { const f = fix('comms', SPECIAL.comms); if (f) return f; }
+    if (k === 'heat') { for (const [i, id, pt] of [[0, 'A', SPECIAL.heatA], [1, 'B', SPECIAL.heatB]]) if (!S.sab.fixed[i]) { const f = fix(id, pt); if (f) return f; } }
+  }
+  let best = null, bd = 90;
+  for (const t of S.myTasks) if (!t.done) { const s = STATIONS.find(q => q.id === t.id), d = dist(me, s); if (d < bd) { bd = d; best = { label: 'TAREFA', run: () => startTask(t) }; } }
+  if (best) return best;
+  if (me.alive && dist(me, SPECIAL.emergency) < 100 && S.emergUsed < S.settings.emergencies && S.sab?.k !== 'heat') return { label: 'EMERGÊNCIA', run: () => { S.emergUsed++; send({ t: 'emergency' }); } };
+  return null;
+}
+function startTask(t) {
+  const t0 = Date.now(); send({ t: 'taskStart', id: t.id }); sfx('click');
+  closeTask = openTask(t.type, t.name, () => { closeTask = null; setTimeout(() => send({ t: 'taskDone', id: t.id }), Math.max(0, TASK_MIN[t.type] - (Date.now() - t0)) + 80); }, () => { closeTask = null; });
+}
+const doUse = () => nearAction()?.run();
+const bodyNear = () => S.me.alive && S.bodies.some(b => dist(S.me, b) < 150);
+const doReport = () => bodyNear() && send({ t: 'report' });
+function killTarget() { let b = null, bd = 95; for (const [id, p] of S.players) if (!p.ghost && !S.mates.has(id) && dist(S.me, p) < bd) { b = id; bd = dist(S.me, p); } return b; }
+const doKill = () => { if (S.role === 'imp' && S.me.alive && !S.cd[0] && killTarget() != null) send({ t: 'kill' }); };
+const ventNear = () => VENTS.some(v => dist(S.me, v) < 80);
+const canVent = () => S.team === 'imp' || S.job === 'engenheiro';
+function doVent() { if (!canVent() || !S.me.alive) return; if (S.me.vent >= 0) { send({ t: 'vent', a: 'out' }); sfx('vent'); } else if (ventNear()) { send({ t: 'vent', a: 'in' }); sfx('vent'); } }
+
+// ---------- HUD ----------
+const mini = $('mini'), mc = mini.getContext('2d'), ms = mini.width / WORLD.w;
+const miniBase = document.createElement('canvas'); miniBase.width = mini.width; miniBase.height = mini.height;
+{ const c = miniBase.getContext('2d'); c.fillStyle = '#0a1226'; c.fillRect(0, 0, 999, 999); c.fillStyle = '#3d5385'; for (const r of RECTS) c.fillRect(r.x * ms, r.y * ms, r.w * ms, r.h * ms); }
+function hudTasks() {
+  const ul = $('hList'); ul.innerHTML = ''; for (const t of S.myTasks) { const li = document.createElement('li'); li.className = t.done ? 'd' : ''; const a = document.createElement('span'), b = document.createElement('small'); a.textContent = t.name; b.textContent = t.room; li.append(a, b); ul.append(li); }
+}
+let hudT = 0;
+function hud(dt) {
+  if ((hudT -= dt) > 0) return; hudT = 0.1; const sab = S.sab, imp = S.role === 'imp', me = S.me;
+  $('hBar').style.width = (S.tk[1] ? (S.tk[0] / S.tk[1]) * 100 : 0) + '%';
+  setObj(me);
+  const sb = $('hSab'); sb.classList.toggle('hide', !sab);
+  if (sab) sb.textContent = sab.k === 'lights' ? 'APAGÃO — restaure a energia nos Geradores' : sab.k === 'comms' ? 'COMUNICAÇÃO INTERROMPIDA — vá a Comunicações' : `SUPERAQUECIMENTO ${sab.t}s — repare em Engenharia e Sala de Controle`;
+  $('mapOff').style.display = sab?.k === 'comms' ? 'flex' : 'none';
+  const act = nearAction(), u = $('bUse'); u.disabled = !act || !!closeTask; u.firstChild.textContent = act ? act.label : 'USAR'; u.classList.toggle('rdy', !!act);
+  const rep = $('bRep'); rep.disabled = !bodyNear(); rep.classList.toggle('rdy', bodyNear());
+  if (imp) {
+    const tg = killTarget() != null, k = $('bKill'); k.disabled = !me.alive || S.cd[0] > 0 || !tg; k.classList.toggle('rdy', !k.disabled); k.querySelector('small').textContent = S.cd[0] ? `${S.cd[0]}s` : 'Q';
+    const sbn = $('bSab'); sbn.disabled = !me.alive || !!sab || S.cd[1] > 0; sbn.querySelector('small').textContent = S.cd[1] ? `${S.cd[1]}s` : 'F';
+  }
+  updAbil(me); if (!$('bigmap').classList.contains('hide')) drawBig();
+  mc.drawImage(miniBase, 0, 0);
+  if (sab?.k !== 'comms') { mc.fillStyle = '#ffe066'; for (const t of S.myTasks) if (!t.done) { const s = STATIONS.find(q => q.id === t.id); mc.fillRect(s.x * ms - 2, s.y * ms - 2, 4, 4); } mc.fillStyle = '#fff'; mc.beginPath(); mc.arc(me.x * ms, me.y * ms, 3.5, 0, 6.3); mc.fill(); if (S.loc) { mc.fillStyle = '#ffd23d'; mc.beginPath(); mc.arc(S.loc[0] * ms, S.loc[1] * ms, 4.5, 0, 6.3); mc.fill(); } }
+}
+
+// ---------- loop ----------
+const WAY = ROOMS.map(r => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 })); let wi = 0, footT = 0, last = performance.now();
+function update(dt) {
+  const me = S.me;
+  if (S.phase !== 'play') { // vitrine: câmera passeia pela estação
+    const w = WAY[wi], dx = w.x - me.x, dy = w.y - me.y, d = Math.hypot(dx, dy); if (d < 30) wi = (wi + 1) % WAY.length; else { me.x += dx / d * 150 * dt; me.y += dy / d * 150 * dt; }
+    me.alive = false; S.vr = 900; S.hideMe = true; S.players.clear(); S.bodies = []; S.myTasks = S.phase === 'menu' || S.phase === 'lobby' ? [] : S.myTasks; S.sab = null;
+    A.tension += (0 - A.tension) * dt; return;
+  }
+  let ix = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0), iy = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
+  if (closeTask || S.intro > 0 || me.vent >= 0) ix = iy = 0;
+  const key = ix + ',' + iy; inT -= dt; if (key !== lastIn || inT <= 0) { send({ t: 'input', x: ix, y: iy }); lastIn = key; inT = 0.1; }
+  const l = Math.hypot(ix, iy); me.moving = l > 0;
+  if (l) {
+    const k = (190 * S.settings.speed * dt) / l, dx = ix * k, dy = iy * k; if (dx) me.face = dx > 0 ? 1 : -1;
+    if (!me.alive) { me.x = Math.max(20, Math.min(WORLD.w - 20, me.x + dx)); me.y = Math.max(20, Math.min(WORLD.h - 20, me.y + dy)); }
+    else { if (canStand(me.x + dx, me.y)) me.x += dx; if (canStand(me.x, me.y + dy)) me.y += dy; }
+    if (me.alive && (footT -= dt) <= 0) { sfx('step'); footT = 0.3; }
+  }
+  for (const p of S.players.values()) { const k = 1 - Math.exp(-dt * 14); p.x += (p.tx - p.x) * k; p.y += (p.ty - p.y) * k; }
+  S.acting = Math.max(0, S.acting - dt * 1.2);
+  A.tension += ((S.sab ? 0.85 : S.bodies.length ? 0.6 : 0.15) - A.tension) * Math.min(1, dt * 0.8);
+  hud(dt);
+}
+function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; update(dt); if (S.hideMe) S.me.alive = false; render(S, dt); requestAnimationFrame(frame); }
+// ---------- profissões: habilidades, painel e mapa grande ----------
+const effJob = () => (S.me.alive ? S.job : S.ghostJob);
+const nearP = r => { let b = null, bd = r; for (const p of S.players.values()) if (!p.ghost && dist(S.me, p) < bd) { b = p; bd = dist(S.me, p); } return b; };
+function buildAbil() {
+  const box = $('abil'); box.innerHTML = '';
+  (ABIL[effJob()] || []).forEach(([id, label], i) => { const b = document.createElement('button'); b.dataset.id = id; b.dataset.k = i + 1; b.append(document.createTextNode(label)); const sm = document.createElement('small'); sm.textContent = i + 1; b.append(sm); b.onclick = () => useAbility(id); box.append(b); });
+}
+function buildMeetAb() {
+  const box = $('mAb'); box.innerHTML = '';
+  for (const [id, label] of ABIL[effJob()] || []) if (id === 'panel' || id === 'infmsg') { const b = document.createElement('button'); b.className = 'btn'; b.textContent = label; b.onclick = () => useAbility(id); box.append(b); }
+}
+function updAbil(me) {
+  const ab = S.ab, v = $('bVent'), cv = canVent() && me.alive; v.classList.toggle('hide', !cv);
+  if (cv) { const vc = ab.cd.vent | 0; v.disabled = vc > 0 || (me.vent < 0 && !ventNear()); v.firstChild.textContent = me.vent >= 0 ? 'SAIR' : 'VENTILAÇÃO'; v.querySelector('small').textContent = vc ? vc + 's' : 'V'; }
+  if (S._ej !== effJob()) { S._ej = effJob(); buildAbil(); }
+  for (const b of $('abil').children) {
+    const id = b.dataset.id, cd = ab.cd[id] | 0, act = ab.act[id] | 0, tg = nearP(95); let dis = cd > 0, txt = cd ? cd + 's' : b.dataset.k;
+    if (id === 'investigate') dis = dis || !bodyNear(); if (id === 'skill' || id === 'probe') dis = dis || !tg; if (id === 'remoteFix') dis = dis || !S.sab;
+    if (id === 'panel') { dis = !(ab.us.panel > 0); txt = 'x' + (ab.us.panel | 0); } if (id === 'infmsg') { dis = !(ab.us.inf > 0); txt = 'x' + (ab.us.inf | 0); }
+    if ((id === 'morph' || id === 'invis') && act > 0) { dis = false; txt = act + 's'; } if (id === 'locate' && act > 0) txt = act + 's';
+    b.disabled = dis; b.classList.toggle('rdy', !dis); b.querySelector('small').textContent = txt;
+  }
+}
+const abilN = i => { const b = $('abil').children[i]; if (b && !b.disabled) useAbility(b.dataset.id); };
+function useAbility(id) {
+  const ph = S.phase; if (ph !== 'play' && !((id === 'panel' || id === 'infmsg') && (ph === 'meet' || ph === 'vote'))) return;
+  const all = [...S.roster].map(([i, r]) => ({ id: i, name: r.name, look: r.look })), others = all.filter(x => x.id !== S.id);
+  if (id === 'locate') return UI.pick('Rastrear quem?', others, to => send({ t: 'ab', a: 'locate', to }));
+  if (id === 'shield') return UI.pick('Proteger quem?', all, to => send({ t: 'ab', a: 'shield', to }));
+  if (id === 'morph') return S.ab.act.morph > 0 ? send({ t: 'ab', a: 'morph' }) : UI.pick('Transformar-se em quem?', others, to => send({ t: 'ab', a: 'morph', to }));
+  if (id === 'infmsg') return UI.pick('Enviar mensagem para…', others, to => UI.pickText('Qual mensagem?', INF_MSGS.map(([k, l]) => ({ id: k, label: l })), kind => send({ t: 'ab', a: 'infmsg', to, kind })));
+  send({ t: 'ab', a: id }); sfx('click');
+}
+function setObj(me) {
+  const o = $('hObj'), j = JOB[S.job]; o.textContent = ''; const b = document.createElement('b'); b.textContent = j.name; b.style.color = j.color === '#111419' ? '#e9f1ff' : j.color;
+  let rest = !me.alive ? ' — fantasma' + (S.ghostJob ? ` (${JOB[S.ghostJob].name})` : '') : S.team === 'imp' ? ' — elimine sem ser descoberto' : S.job === 'joker' ? ' — faça-os votar em você' : S.job === 'execution' ? ` — ejete ${S.roster.get(S.target)?.name || 'o alvo'}` : S.team === 'neu' ? '' : ` — tarefas (${S.tk[0]}/${S.tk[1]})`;
+  if (S.probe) rest += ` · sondando ${Math.round(S.probe[1] * 100)}%`; o.append(b, document.createTextNode(rest));
+}
+const big = $('bigmap'), bc = big.getContext('2d'), bs = big.width / WORLD.w;
+const toggleMap = () => { if (S.phase === 'play') big.classList.toggle('hide'); };
+function drawBig() {
+  bc.fillStyle = '#0a1226'; bc.fillRect(0, 0, big.width, big.height); bc.fillStyle = '#3d5385'; for (const r of RECTS) bc.fillRect(r.x * bs, r.y * bs, r.w * bs, r.h * bs);
+  bc.textAlign = 'center'; bc.font = '700 13px sans-serif';
+  if (S.sab?.k === 'comms') { bc.fillStyle = '#ff4f6d'; bc.font = '800 34px sans-serif'; bc.fillText('SEM SINAL', big.width / 2, big.height / 2); return; }
+  bc.fillStyle = '#dfe9ff'; for (const r of ROOMS) bc.fillText(r.name, (r.x + r.w / 2) * bs, (r.y + r.h / 2) * bs);
+  bc.fillStyle = '#ffe066'; for (const t of S.myTasks) if (!t.done) { const s = STATIONS.find(q => q.id === t.id); bc.beginPath(); bc.arc(s.x * bs, s.y * bs, 5, 0, 6.3); bc.fill(); }
+  if (S.loc) { bc.strokeStyle = '#ffd23d'; bc.lineWidth = 3; bc.beginPath(); bc.arc(S.loc[0] * bs, S.loc[1] * bs, 11, 0, 6.3); bc.stroke(); bc.fillStyle = '#ffd23d'; bc.fillText(S.roster.get(S.loc[2])?.name || '?', S.loc[0] * bs, S.loc[1] * bs - 16); }
+  bc.fillStyle = '#fff'; bc.beginPath(); bc.arc(S.me.x * bs, S.me.y * bs, 6, 0, 6.3); bc.fill();
+}
+S.nameColor = p => (p.me ? JOB[S.job]?.color : S.known.has(p.id) ? JOB[S.known.get(p.id)].color : null);
+S.tagOf = p => (!p.me && S.known.has(p.id) ? JOB[S.known.get(p.id)].name : null);
+net.on('hint', m => UI.toast(m.text, 7000));
+net.on('panel', m => UI.pick('Painel do Cientista', m.list.map(([id, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: al ? 'VIVO' : 'MORTO' })), null));
+net.on('reveal', m => { for (const [id, j] of m.list) S.known.set(id, j); UI.toast(m.all ? 'Todas as profissões foram reveladas!' : `Descoberto: ${S.roster.get(m.list[0][0])?.name} é ${JOB[m.list[0][1]].name}.`, 6000); sfx('ok'); });
+net.on('shield', m => { UI.toast(`Um Anjo protege você por ${m.dur}s!`, 5000); sfx('fixed'); });
+net.on('infmsg', m => { UI.toast(m.text, 8000); sfx('report'); });
+net.on('ghost', m => { S.ghostJob = m.job; S._ej = null; buildAbil(); UI.toast(`Você recebeu a profissão: ${JOB[m.job].name}.`, 5000); });
+net.on('sup', m => { S.sup = m.left; if (m.fresh) UI.toast('Voto Supremo desbloqueado! Use-o na votação.', 5000); });
+requestAnimationFrame(frame);
+go('menu');
