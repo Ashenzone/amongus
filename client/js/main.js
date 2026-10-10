@@ -16,7 +16,7 @@ Object.assign(A.vol, P.vol); setQuality(P.q);
 
 const S = { phase: 'menu', id: null, roster: new Map(), role: null, mates: new Set(), me: { x: SPECIAL.spawn.x, y: SPECIAL.spawn.y, alive: false, vent: -1, moving: false, face: 1 },
   players: new Map(), bodies: [], myTasks: [], sab: null, vr: 900, look: P.look, name: P.name, acting: 0, cd: [0, 0], intro: 0, tk: [0, 1], settings: { speed: 1, emergencies: 1 },
-  emergUsed: 0, hideMe: true, lobby: null, onDoor: () => sfx('door'), job: null, team: null, ghostJob: null, target: null, known: new Map(), ab: { cd: {}, act: {}, us: {}, sup: 0 }, arrows: [], loc: null, probe: null, meInv: false, meShield: 0, sup: 0, supMode: false, _ej: null, cams: null, camsOn: false, view: null, introEnd: 0 };
+  emergUsed: 0, hideMe: true, lobby: null, onDoor: () => sfx('door'), job: null, team: null, ghostJob: null, target: null, known: new Map(), ab: { cd: {}, act: {}, us: {}, sup: 0 }, arrows: [], loc: null, probe: null, meInv: false, meShield: 0, sup: 0, supMode: false, _ej: null, cams: null, camsOn: false, view: null, introEnd: 0, bg: { x: SPECIAL.spawn.x, y: SPECIAL.spawn.y }, jobPanel: false };
 const send = o => net.send(o);
 initRender($('game'));
 
@@ -61,7 +61,7 @@ net.on('lobby', m => {
   UI.renderLobby(m, S.id, send, m.min);
 });
 function begin(m, resume) {
-  S.phase = 'play'; S.role = m.role; S.mates = new Set(m.mates.map(x => x[0])); S.known = new Map(m.mates); S.job = m.job; S.team = m.team; S.ghostJob = m.ghostJob; S.target = m.target; S.sup = m.sup || 0; S.supMode = false; S.arrows = []; S.loc = null; S._ej = null; S.roster = new Map(m.players.map(p => [p.id, p])); S.myTasks = m.tasks.map(t => ({ ...t }));
+  S.phase = 'play'; S.role = m.role; S.mates = new Set(m.mates.map(x => x[0])); S.known = new Map(m.mates); S.job = m.job; S.team = m.team; S.ghostJob = m.ghostJob; S.target = m.target; S.sup = m.sup || 0; S.jobPanel = !!m.jp; S.supMode = false; S.arrows = []; S.loc = null; S._ej = null; S.roster = new Map(m.players.map(p => [p.id, p])); S.myTasks = m.tasks.map(t => ({ ...t }));
   Object.assign(S.me, { x: m.x, y: m.y, alive: m.alive !== false, vent: -1, moving: false }); S.players.clear(); S.bodies = []; S.sab = null; S.emergUsed = m.emergUsed || 0; S.settings = m.settings;
   const mine = S.roster.get(S.id); S.look = mine.look; S.name = mine.name; S.hideMe = false; S.vr = 420; R.cam.x = m.x; R.cam.y = m.y; R.vis = 420;
   go(null); $('hud').classList.remove('hide'); $('sabMenu').classList.add('hide');
@@ -112,7 +112,7 @@ net.on('phase', m => { S.phase = 'vote'; UI.startVote(m.time); sfx('vote'); $('m
 net.on('voted', m => { UI.markVoted(m.id); sfx('click'); });
 net.on('chat', m => UI.addChat(m, S.roster));
 net.on('result', m => { S.phase = 'result'; UI.showResult(m, S.roster); });
-net.on('play', () => { S.phase = 'play'; UI.closeMeeting(); go(null); $('hud').classList.remove('hide'); S.players.clear(); S.hideMe = false; sfx('ok'); S._ej = null; buildAbil(); });
+net.on('play', () => { S.phase = 'play'; S.hideMe = false; S.view = null; UI.closeMeeting(); go(null); $('hud').classList.remove('hide'); S.players.clear(); S.hideMe = false; sfx('ok'); S._ej = null; buildAbil(); });
 net.on('end', m => { S.phase = 'end'; closeTaskUi(); alarm(false); $('hud').classList.add('hide'); A.mode = null; UI.showEnd(m, S.roster, { team: S.team, job: S.job }); $('bigmap').classList.add('hide'); });
 net.on('close', () => {
   if (S.phase === 'menu') return; const s = JSON.parse(sessionStorage.getItem('quorum.s') || 'null'); if (!s) return toMenu('Conexão encerrada.');
@@ -192,9 +192,10 @@ function hud(dt) {
 const WAY = ROOMS.map(r => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 })); let wi = 0, footT = 0, last = performance.now();
 function update(dt) {
   const me = S.me;
-  if (S.phase !== 'play') { // vitrine: câmera passeia pela estação
-    const w = WAY[wi], dx = w.x - me.x, dy = w.y - me.y, d = Math.hypot(dx, dy); if (d < 30) wi = (wi + 1) % WAY.length; else { me.x += dx / d * 150 * dt; me.y += dy / d * 150 * dt; }
-    me.alive = false; S.vr = 900; S.hideMe = true; S.players.clear(); S.bodies = []; S.myTasks = S.phase === 'menu' || S.phase === 'lobby' ? [] : S.myTasks; S.sab = null;
+  if (S.phase === 'play') { S.hideMe = false; S.view = null; }
+  else { // vitrine: a câmera passeia pela estação sem tocar no estado real do jogador (vivo/morto, posição)
+    const bg = S.bg, w = WAY[wi], dx = w.x - bg.x, dy = w.y - bg.y, d = Math.hypot(dx, dy); if (d < 30) wi = (wi + 1) % WAY.length; else { bg.x += dx / d * 150 * dt; bg.y += dy / d * 150 * dt; }
+    S.view = bg; S.vr = 900; S.hideMe = true; S.players.clear(); S.bodies = []; S.myTasks = S.phase === 'menu' || S.phase === 'lobby' ? [] : S.myTasks; S.sab = null; S.arrows = [];
     A.tension += (0 - A.tension) * dt; return;
   }
   let ix = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0), iy = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
@@ -212,7 +213,7 @@ function update(dt) {
   A.tension += ((S.sab ? 0.85 : S.bodies.length ? 0.6 : 0.15) - A.tension) * Math.min(1, dt * 0.8);
   hud(dt);
 }
-function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; update(dt); if (S.hideMe) S.me.alive = false; render(S, dt); requestAnimationFrame(frame); }
+function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; update(dt); render(S, dt); requestAnimationFrame(frame); }
 // ---------- profissões: habilidades, painel e mapa grande ----------
 const effJob = () => (S.me.alive ? S.job : S.ghostJob);
 const nearP = r => { let b = null, bd = r; for (const p of S.players.values()) if (!p.ghost && dist(S.me, p) < bd) { b = p; bd = dist(S.me, p); } return b; };
@@ -222,6 +223,7 @@ function buildAbil() {
 }
 function buildMeetAb() {
   const box = $('mAb'); box.innerHTML = '';
+  if (S.job === 'mentalista' && S.jobPanel && S.me.alive) { const b = document.createElement('button'); b.className = 'btn'; b.textContent = 'PROFISSÕES'; b.onclick = () => send({ t: 'ab', a: 'jobpanel' }); box.append(b); }
   for (const [id, label] of ABIL[effJob()] || []) if (id === 'panel' || id === 'infmsg') { const b = document.createElement('button'); b.className = 'btn'; b.textContent = label; b.onclick = () => useAbility(id); box.append(b); }
 }
 function updAbil(me) {
@@ -283,6 +285,8 @@ function camKey(code) { if (['KeyE', 'Escape', 'KeyW', 'KeyA', 'KeyS', 'KeyD', '
 $('cExit').onclick = () => send({ t: 'ab', a: 'camOff' });
 net.on('camOff', () => { S.cams = null; $('camUI').classList.add('hide'); $('hud').classList.remove('incam'); UI.toast('Câmeras fora do ar.'); });
 net.on('hint', m => UI.toast(m.text, 7000));
+net.on('unlock', () => { S.jobPanel = true; UI.toast('Painel de profissões desbloqueado! Abra-o durante as reuniões.', 6000); sfx('ok'); });
+net.on('jobpanel', m => UI.pick('Painel de profissões', m.list.map(([id, job, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: `${JOB[job].name} · ${al ? 'VIVO' : 'MORTO'}` })), null));
 net.on('panel', m => UI.pick('Painel do Cientista', m.list.map(([id, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: al ? 'VIVO' : 'MORTO' })), null));
 net.on('reveal', m => { for (const [id, j] of m.list) S.known.set(id, j); UI.toast(m.all ? 'Todas as profissões foram reveladas!' : `Descoberto: ${S.roster.get(m.list[0][0])?.name} é ${JOB[m.list[0][1]].name}.`, 6000); sfx('ok'); });
 net.on('shield', m => { UI.toast(`Um Anjo protege você por ${m.dur}s!`, 5000); sfx('fixed'); });

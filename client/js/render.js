@@ -213,7 +213,7 @@ export function render(S, dt) {
   for (let i = P.length - 1; i >= 0; i--) { const p = P[i]; p.life -= dt; if (p.life <= 0) { P.splice(i, 1); continue; } p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; ctx.globalAlpha = Math.min(1, p.life / p.max * 1.5); ctx.fillStyle = p.col; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.5 + p.life / p.max * 0.5), 0, TAU); ctx.fill(); }
   ctx.globalAlpha = 1;
   // iluminação (campo de visão)
-  if (me.alive || S.view) {
+  if (!S.hideMe && me.alive) {
     const target = S.vr || 420; R.vis += (target - R.vis) * Math.min(1, dt * (target < R.vis ? 5 : 2));
     const s = lc.width / W, [mx, my] = toScreen(vpos.x, vpos.y - 20), rad = R.vis * zoom * s * (sabL ? 0.9 + Math.random() * 0.15 : 1);
     lx.globalCompositeOperation = 'source-over'; lx.fillStyle = 'rgba(3,5,14,.965)'; lx.fillRect(0, 0, lc.width, lc.height);

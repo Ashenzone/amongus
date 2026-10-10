@@ -110,7 +110,7 @@ export class Room {
     clearInterval(this.loop); this.loop = setInterval(() => this.tick(), 33);
   }
   startPayload(p) {
-    return { role: p.role, team: p.team, job: p.job, ghostJob: p.ghostJob, target: p.target, sup: p.supLeft, x: p.x, y: p.y, alive: p.alive,
+    return { role: p.role, team: p.team, job: p.job, ghostJob: p.ghostJob, jp: p.revealed, target: p.target, sup: p.supLeft, x: p.x, y: p.y, alive: p.alive,
       mates: p.team === 'imp' ? this.list.filter(q => q.team === 'imp').map(q => [q.id, q.job]) : [],
       tasks: p.tasks, settings: this.settings, players: this.list.map(q => ({ id: q.id, name: q.name, look: q.look })), emergUsed: p.emerg };
   }
@@ -238,7 +238,7 @@ export class Room {
   }
   taskHooks(p) {
     if (!p.supGiven && (p.job === 'juiz' || p.job === 'mentalista')) { p.supGiven = true; p.supLeft = this.settings.jui_uses; this.send(p, { t: 'sup', left: p.supLeft, fresh: true }); }
-    if (p.job === 'mentalista' && !p.revealed && p.tasks.every(k => k.done)) { p.revealed = true; this.send(p, { t: 'reveal', all: true, list: this.list.map(q => [q.id, q.job]) }); }
+    if (p.job === 'mentalista' && !p.revealed && p.tasks.every(k => k.done)) { p.revealed = true; this.send(p, { t: 'unlock' }); }
   }
   // Morte unificada (kill, tiro, voto). force ignora escudo.
   slay(v, killer, { body = true, force = false } = {}) {
@@ -328,6 +328,10 @@ export class Room {
         if (v.team === 'inn') this.slay(p, null, { force: true }); // matou um inocente: o atirador morre junto
         else { p.x = v.x; p.y = v.y; }
         this.checkWin(); break;
+      }
+      case 'jobpanel': {
+        if (J !== 'mentalista' || !p.revealed || (ph !== 'meet' && ph !== 'vote')) return;
+        this.send(p, { t: 'jobpanel', list: this.list.filter(q => !q.gone).map(q => [q.id, q.job, q.alive ? 1 : 0]) }); break;
       }
       case 'probe': {
         if (J !== 'mentalista' || !play || !p.alive || p.probe || p.cd.probe > 0) return;

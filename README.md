@@ -28,6 +28,9 @@ WASD/setas mover · E usar/tarefa/reparar/emergência · R reportar · Q elimina
 Início da partida: Carregando → Categoria → Profissão. Habilidades: botões na tela (teclas 1–4), M abre o mapa grande (rastreio do Localizador).
 O host configura no lobby (botão PROFISSÕES): chance e máximo de cada profissão, nº de neutros/impostores, recargas, durações, usos e regras de cada habilidade; chance 0 desliga a profissão.
 
+## Mentalista
+Tem dois painéis: **PAINEL** (igual ao do Cientista: vivo/morto, usos por reunião) e **PROFISSÕES** (desbloqueia ao completar todas as tarefas; mostra nome, profissão e vivo/morto de todos; só abre durante as reuniões). A sondagem individual continua revelando a profissão de quem ficar parado.
+
 ## Câmeras e setas
 - **Câmeras de segurança:** console na Sala de Segurança (E). Mostra 4 imagens ao vivo (Sala Central, Corredor do Laboratório, Corredor Leste, Armazém). Os aparelhos nas paredes ficam com LED vermelho piscando quando alguém assiste. A sabotagem de comunicação derruba as câmeras. Quem assiste fica parado.
 - **Setas:** azuis = tarefas pendentes (configurável em Configurações: todas / 3 mais próximas / desligadas); vermelha = onde consertar a sabotagem; rosa = corpo do Barulhento; amarela = alvo do Localizador; vermelhas dentro do duto = direção dos outros jogadores.
