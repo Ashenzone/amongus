@@ -64,6 +64,7 @@ export function initSettings(P, save) {
     const w = el('div', 'set'); w.append(el('span', null, label)); const r = el('input'); r.type = 'range'; r.min = 0; r.max = 1; r.step = 0.05; r.value = A.vol[k]; r.oninput = () => { setVol(k, +r.value); P.vol = { ...A.vol }; save(); }; w.append(r); box.append(w);
   }
   const q = el('div', 'set'); q.append(el('span', null, 'Qualidade gráfica')); const s = el('select'); ['Baixa', 'Média', 'Alta'].forEach((n, i) => { const o = el('option', null, n); o.value = i; s.append(o); }); s.value = P.q; s.onchange = () => { P.q = +s.value; setQuality(P.q); save(); }; q.append(s); box.append(q);
+  const ar = el('div', 'set'); ar.append(el('span', null, 'Setas de tarefas')); const sa = el('select'); ['Todas', '3 mais próximas', 'Desligadas'].forEach((n, i) => { const o = el('option', null, n); o.value = i; sa.append(o); }); sa.value = P.arr || 0; sa.onchange = () => { P.arr = +sa.value; save(); }; ar.append(sa); box.append(ar);
   const f = el('button', 'btn', 'TELA CHEIA'); f.onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); box.append(f);
 }
 
@@ -99,14 +100,26 @@ export function showResult(m, roster) {
   M.phase = 'result'; $('mVote').disabled = true; $('mSkip').disabled = true; $('mTitle').textContent = 'Resultado da votação'; M.t0 = performance.now(); M.dur = m.time * 1000;
   for (const [tid, voters] of Object.entries(m.votes)) { const vs = M.cards.get(+tid)?.querySelector('.vs'); voters.forEach(v => { const d = el('i'); d.style.background = COLORS[roster.get(v)?.look.c] || '#fff'; vs?.append(d); }); }
   $('mNote').textContent = m.skip.length ? `Votos pulados: ${m.skip.length}` : '';
-  setTimeout(() => {
-    const e = $('eject'), p = roster.get(m.ejected); e.innerHTML = '';
-    if (p) { e.append(el('div', null, `${p.name} foi ejetado(a)${m.supreme ? ' pelo Voto Supremo' : ''}.`)); if (m.imp !== null) e.append(el('div', null, m.imp ? 'Era um infiltrado.' : 'Não era um infiltrado.')); if (m.left != null) e.append(el('small', null, `Restam ${m.left} infiltrado(s).`)); sfx('eject'); }
-    else e.append(el('div', null, 'Ninguém foi ejetado.'), el('small', null, 'Empate ou votos pulados.'));
-    e.classList.add('on');
-  }, 2200);
+  setTimeout(() => ejectScene(m, roster), 2200);
 }
-export function closeMeeting() { clearInterval(M.iv); $('eject').classList.remove('on'); }
+let ejRaf = 0, ejIv = 0, ejTo = 0;
+function ejectScene(m, roster) {
+  const e = $('eject'), p = roster.get(m.ejected); cancelAnimationFrame(ejRaf); clearInterval(ejIv); clearTimeout(ejTo); e.innerHTML = ''; e.classList.add('on');
+  const cv = el('canvas'); cv.width = innerWidth; cv.height = innerHeight; e.append(cv); const box = el('div', 'etext'); e.append(box); const c = cv.getContext('2d'), W = cv.width, H = cv.height;
+  const stars = Array.from({ length: 110 }, () => ({ x: Math.random() * W, y: Math.random() * H, z: 0.3 + Math.random() * 1.3 }));
+  const lines = p ? [`${p.name} foi ejetado${m.supreme ? ' pelo Voto Supremo' : ''}.`, m.imp === null ? '' : (m.imp ? 'Era um infiltrado.' : 'Não era um infiltrado.'), m.left != null ? `Restam ${m.left} infiltrado(s).` : ''] : ['Ninguém foi ejetado.', 'Empate ou votos pulados.', ''];
+  const full = lines.filter(Boolean).join('\n'), t0 = performance.now(); let typed = 0; sfx(p ? 'eject' : 'click');
+  (function frame(now) {
+    const t = (now - t0) / 1000; c.fillStyle = '#03050f'; c.fillRect(0, 0, W, H); c.fillStyle = '#fff';
+    for (const s of stars) { s.x -= 55 * s.z / 60; if (s.x < 0) s.x = W; c.globalAlpha = 0.35 + 0.1 * s.z; c.fillRect(s.x, s.y, s.z * 1.7, s.z * 1.7); } c.globalAlpha = 1;
+    if (p && t < 3.6) { const k = t / 3.6, x = -90 + k * (W + 180), y = H * 0.4 + Math.sin(k * 5) * H * 0.07, sc = Math.min(W, H) / 250 * (1 - k * 0.4);
+      c.fillStyle = 'rgba(180,220,255,.25)'; for (let i = 1; i < 9; i++) { c.beginPath(); c.arc(x - i * 26 * sc, y - 10 * sc + Math.sin(t * 9 + i) * 6, Math.max(1, 5 * sc - i * 0.4), 0, 6.3); c.fill(); }
+      c.save(); c.translate(x, y); c.rotate(t * 5); c.scale(sc, sc); drawCrew(c, p.look, 0, 22, { t, ghost: false }); c.restore(); }
+    ejRaf = requestAnimationFrame(frame);
+  })(t0);
+  ejTo = setTimeout(() => { ejIv = setInterval(() => { box.textContent = full.slice(0, ++typed); if (typed >= full.length) clearInterval(ejIv); }, 45); }, 1100);
+}
+export function closeMeeting() { clearInterval(M.iv); cancelAnimationFrame(ejRaf); clearInterval(ejIv); clearTimeout(ejTo); $('eject').classList.remove('on'); }
 
 // ---------- profissões (configuração do host) ----------
 let jtab = 'inn';

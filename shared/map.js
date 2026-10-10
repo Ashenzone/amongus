@@ -54,7 +54,7 @@ export const VENTS = [
 export const SPECIAL = {
   spawn: { x: 1500, y: 950 }, emergency: { x: 1500, y: 880 },
   lights: { x: 1030, y: 1650 }, comms: { x: 2500, y: 1600 },
-  heatA: { x: 550, y: 1620 }, heatB: { x: 2500, y: 1060 },
+  heatA: { x: 550, y: 1620 }, heatB: { x: 2500, y: 1060 }, camConsole: { x: 2500, y: 490 },
 };
 export function walkable(x, y) {
   for (const r of RECTS) if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return true;
@@ -67,3 +67,10 @@ export function roomAt(x, y) {
   for (const r of ROOMS) if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r;
   return null;
 }
+// Câmeras de segurança: (x,y) = aparelho na parede · (vx,vy) = centro da imagem transmitida
+export const CAMS = [
+  { name: 'Sala Central', x: 1500, y: 768, vx: 1500, vy: 950 },
+  { name: 'Corredor do Laboratório', x: 1010, y: 392, vx: 1010, vy: 430 },
+  { name: 'Corredor Leste', x: 2000, y: 892, vx: 2000, vy: 930 },
+  { name: 'Armazém', x: 1500, y: 1392, vx: 1500, vy: 1560 },
+];

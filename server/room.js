@@ -1,13 +1,13 @@
 // Sala/partida autoritativa. O cliente só envia intenções; tudo é validado aqui.
 import crypto from 'node:crypto';
-import { WORLD, canStand, STATIONS, VENTS, SPECIAL, roomAt } from '../shared/map.js';
+import { WORLD, canStand, STATIONS, VENTS, SPECIAL, CAMS, roomAt } from '../shared/map.js';
 import { sanitizeLook, sanitizeName } from '../shared/cosmetics.js';
 import { JOBS, JOB, DEFAULT_SETTINGS, SETTING_LIMITS, colorTone, INF_MSGS } from '../shared/jobs.js';
 
 export const MIN_PLAYERS = +process.env.MIN_PLAYERS || 4;
 const MAX_PLAYERS = 15;
-const BASE_SPEED = 190, BASE_VIS = 420, KILL_R = 95, REPORT_R = 150, TASK_R = 110, FIX_R = 110, VENT_R = 80, PROBE_R = 110;
-const DC_GRACE = 45, SAB_CD = 30, HEAT_TIME = 45, INTRO = 4.2, RESULT_TIME = 7, END_TIME = 12;
+const BASE_SPEED = 190, BASE_VIS = 420, KILL_R = 95, REPORT_R = 150, TASK_R = 110, FIX_R = 110, VENT_R = 80, PROBE_R = 110, CAM_R = 300;
+const DC_GRACE = 45, SAB_CD = 30, HEAT_TIME = 45, INTRO = 4.2, RESULT_TIME = 8, END_TIME = 12;
 const TASK_MIN = { wires: 2000, code: 2200, calibrate: 1500, fuel: 3200, reboot: 2000, order: 2200 };
 const DEFAULTS = { impostors: 0, speed: 1, vision: 1, discuss: 30, vote: 30, tasks: 4, killCd: 22, emergencies: 1, confirm: 1, ...DEFAULT_SETTINGS };
 const LIMITS = { impostors: [0, 3], speed: [0.75, 1.5], vision: [0.5, 1.5], discuss: [10, 120], vote: [10, 120], tasks: [1, 8], killCd: [10, 45], emergencies: [0, 3], confirm: [0, 1], ...SETTING_LIMITS };
@@ -36,7 +36,7 @@ export class Room {
     const p = { id: this.nextId++, token: crypto.randomBytes(12).toString('hex'), name: sanitizeName(name), look: sanitizeLook(look), ws,
       x: 0, y: 0, ix: 0, iy: 0, face: 1, moving: false, alive: true, role: null, team: null, job: null, ghostJob: null, tasks: [], ts: {}, killCd: 0, emerg: 0, vent: -1,
       vote: null, voted: false, chatAt: 0, dcAt: 0, gone: false, cd: {}, act: {}, uses: {}, shieldT: 0, morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
-      killedBy: null, deathRoom: '', target: null, seen: new Set(), revealed: false, sciWait: false };
+      killedBy: null, deathRoom: '', target: null, seen: new Set(), revealed: false, sciWait: false, watch: false };
     if (!this.hostId) this.hostId = p.id;
     this.players.set(p.id, p);
     this.send(p, { t: 'hello', id: p.id, token: p.token, code: this.code });
@@ -102,7 +102,7 @@ export class Room {
       const a = (i / n) * Math.PI * 2;
       Object.assign(q, { alive: true, x: SPECIAL.spawn.x + Math.cos(a) * 85, y: SPECIAL.spawn.y + Math.sin(a) * 60, ix: 0, iy: 0, vent: -1, killCd: 10 + INTRO, emerg: 0, vote: null, voted: false, ts: {}, gone: false,
         ghostJob: null, cd: q.job === 'xerife' || q.job === 'mentalista' ? { skill: 10 + INTRO } : {}, act: {}, uses: { panel: S.cie_uses, inf: S.inf_uses }, shieldT: 0, morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
-        killedBy: null, deathRoom: '', seen: new Set(), revealed: false, sciWait: false,
+        killedBy: null, deathRoom: '', seen: new Set(), revealed: false, sciWait: false, watch: false,
         tasks: q.team === 'neu' ? [] : shuffle([...STATIONS]).slice(0, S.tasks).map(s => ({ id: s.id, type: s.type, name: s.name, room: s.room, done: false })) });
     });
     Object.assign(this, { phase: 'play', bodies: [], sab: null, sabCd: 25, intro: INTRO, meet: null, supreme: null, ghostN: {}, last: Date.now(), n: 0 });
@@ -147,7 +147,7 @@ export class Room {
     for (let i = this.bodies.length - 1; i >= 0; i--) { const b = this.bodies[i]; if (b.vanish > 0 && (b.vanish -= dt) <= 0) this.bodies.splice(i, 1); }
   }
   move(p, dt) {
-    if (p.gone || p.vent >= 0) return;
+    if (p.gone || p.vent >= 0 || p.watch) { if (p.watch) p.moving = false; return; }
     const l = Math.hypot(p.ix, p.iy); p.moving = l > 0.05;
     if (!p.moving) return;
     const k = Math.min(1, 1 / l) * BASE_SPEED * this.settings.speed * dt, dx = p.ix * k, dy = p.iy * k;
@@ -169,10 +169,12 @@ export class Room {
   snapshot() {
     const tk = this.taskCount(), sab = this.sab && { k: this.sab.k, t: Math.ceil(this.sab.t || 0), fixed: this.sab.fixed };
     const arrows = this.bodies.filter(b => b.arrow).map(b => [b.x | 0, b.y | 0]);
+    if (this.sab?.k === 'comms') for (const p of this.list) if (p.watch) { p.watch = false; this.send(p, { t: 'camOff' }); }
+    const camOn = this.list.some(p => p.watch);
     const r0 = o => { const r = {}; for (const k in o) r[k] = Math.ceil(o[k]); return r; };
     for (const v of this.list) {
       if (!v.ws) continue;
-      const R = this.visR(v) * 1.15, pl = [], bd = [];
+      const vrr = this.visR(v), R = vrr * 1.15, pl = [], bd = [];
       for (const p of this.list) {
         if (p === v || p.gone || p.vent >= 0) continue;
         if (!p.alive && v.alive) continue;
@@ -181,10 +183,13 @@ export class Room {
         pl.push([p.id, p.x | 0, p.y | 0, p.face, p.moving ? 1 : 0, p.alive ? 0 : 1, p.morph || p.id, inv ? 1 : 0]);
       }
       for (const b of this.bodies) if (!v.alive || dist(v, b) <= R) bd.push([b.id, b.x | 0, b.y | 0, b.g ? 1 : 0]);
+      let cams = null, vd = null;
+      if (v.watch) cams = CAMS.map(c => { const o = { x: c.vx, y: c.vy }; return [this.list.filter(p => p.alive && !p.gone && p.vent < 0 && !(p.act.invis > 0) && dist(p, o) <= CAM_R).map(p => [p.id, p.x | 0, p.y | 0, p.face, p.moving ? 1 : 0, p.morph || p.id]), this.bodies.filter(b => dist(b, o) <= CAM_R).map(b => [b.id, b.x | 0, b.y | 0, b.g ? 1 : 0])]; });
+      if (v.vent >= 0 && v.alive) vd = this.list.filter(p => p !== v && p.alive && !p.gone && dist(p, v) <= 1600).map(p => +Math.atan2(p.y - v.y, p.x - v.x).toFixed(2));
       const tr = v.track && this.players.get(v.track); const loc = tr && tr.alive && v.act.locate > 0 ? [tr.x | 0, tr.y | 0, tr.id] : null;
-      this.send(v, { t: 'snap', you: [v.x | 0, v.y | 0, v.vent, v.morph || v.id, v.act.invis > 0 ? 1 : 0, Math.ceil(v.shieldT > 0 ? v.shieldT : 0)], pl, bd, tk, sab: sab || null, vr: Math.round(this.visR(v)), ar: arrows, loc,
+      this.send(v, { t: 'snap', you: [v.x | 0, v.y | 0, v.vent, v.morph || v.id, v.act.invis > 0 ? 1 : 0, Math.ceil(v.shieldT > 0 ? v.shieldT : 0)], pl, bd, tk, sab: sab || null, vr: Math.round(vrr), ar: arrows, loc,
         cd: v.role === 'imp' ? [Math.max(0, Math.ceil(v.killCd)), Math.max(0, Math.ceil(this.sabCd))] : null, ab: { cd: r0(v.cd), act: r0(v.act), us: v.uses, sup: v.supLeft },
-        probe: v.probe ? [v.probe.id, v.probe.t / this.settings.men_inv] : null, intro: this.intro > 0 ? Math.ceil(this.intro) : 0 });
+        probe: v.probe ? [v.probe.id, v.probe.t / this.settings.men_inv] : null, cams, vd, co: camOn ? 1 : 0, intro: this.intro > 0 ? Math.ceil(this.intro) : 0 });
     }
   }
   housekeeping(now) {
@@ -238,7 +243,7 @@ export class Room {
   // Morte unificada (kill, tiro, voto). force ignora escudo.
   slay(v, killer, { body = true, force = false } = {}) {
     if (!v.alive || (!force && v.shieldT > 0)) return false;
-    v.alive = false; v.ix = v.iy = 0; v.moving = false; v.vent = -1; v.track = null; v.probe = null; v.act = {}; v.morph = null;
+    v.alive = false; v.ix = v.iy = 0; v.moving = false; v.watch = false; v.vent = -1; v.track = null; v.probe = null; v.act = {}; v.morph = null;
     v.killedBy = killer?.id ?? null; v.deathRoom = roomAt(v.x, v.y)?.name || 'corredor';
     const vib = killer?.job === 'vibora';
     if (body) {
@@ -294,6 +299,10 @@ export class Room {
     const tgt = () => { const t = this.players.get(+m.to); return t && !t.gone && t.alive && t !== p ? t : null; };
     const bad = msg => this.send(p, { t: 'err', msg });
     switch (a) {
+      case 'cam':
+        if (!play || !p.alive || p.vent >= 0 || this.sab?.k === 'comms' || Math.hypot(p.x - SPECIAL.camConsole.x, p.y - SPECIAL.camConsole.y) > 110) return;
+        p.watch = true; p.ix = p.iy = 0; p.moving = false; break;
+      case 'camOff': p.watch = false; break;
       case 'investigate': {
         if (J !== 'detetive' || !play) return; const b = this.bodies.find(b => dist(p, b) <= REPORT_R); if (!b) return;
         if (p.seen.has(b.id)) return bad('Você já investigou este corpo.'); p.seen.add(b.id);
@@ -321,8 +330,8 @@ export class Room {
         this.checkWin(); break;
       }
       case 'probe': {
-        if (J !== 'mentalista' || !play || !p.alive) return;
-        const t = this.nearestVictim(p, () => true); if (!t || dist(p, t) > PROBE_R) return bad('Aproxime-se de alguém.'); p.probe = { id: t.id, t: 0 }; break;
+        if (J !== 'mentalista' || !play || !p.alive || p.probe || p.cd.probe > 0) return;
+        const t = this.nearestVictim(p, () => true); if (!t || dist(p, t) > PROBE_R) return bad('Aproxime-se de alguém.'); p.probe = { id: t.id, t: 0 }; p.cd.probe = S.men_cd; break;
       }
       case 'shield': {
         if (J !== 'anjo' || p.alive || !play || p.cd.shield > 0) return;
@@ -352,7 +361,7 @@ export class Room {
 
   // ---------- reuniões ----------
   meeting(by, reason, bodyId = null) {
-    for (const p of this.list) { p.vote = null; p.voted = false; p.ix = p.iy = 0; p.vent = -1; p.morph = null; p.act = {}; p.track = null; p.probe = null; }
+    for (const p of this.list) { p.vote = null; p.voted = false; p.ix = p.iy = 0; p.vent = -1; p.morph = null; p.act = {}; p.track = null; p.probe = null; p.watch = false; }
     Object.assign(this, { phase: 'meet', timer: this.settings.discuss, sab: null, bodies: [], supreme: null, meet: { by: by.id, reason, body: bodyId } });
     this.all({ t: 'meeting', by: by.id, reason, body: bodyId, time: this.settings.discuss, alive: this.alive().map(p => p.id), dead: this.list.filter(p => !p.alive || p.gone).map(p => p.id) });
     for (const p of this.list) if (p.supLeft > 0 && p.alive) this.send(p, { t: 'sup', left: p.supLeft });

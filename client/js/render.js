@@ -1,5 +1,5 @@
 // Renderização 2D: mapa pré-renderizado por sala, personagens vetoriais, iluminação, partículas.
-import { RECTS, CORRIDORS, STATIONS, VENTS, SPECIAL, WORLD } from '/shared/map.js';
+import { RECTS, CORRIDORS, STATIONS, VENTS, SPECIAL, WORLD, CAMS } from '/shared/map.js';
 import { COLORS } from '/shared/cosmetics.js';
 
 export const Q = { level: 1 };
@@ -146,9 +146,9 @@ export function setQuality(l) { Q.level = l; if (cvs) resize(); }
 export function toScreen(x, y) { return [(x - R.cam.x) * zoom + W / 2, (y - R.cam.y) * zoom + H / 2]; }
 
 export function render(S, dt) {
-  R.t += dt; const t = R.t, me = S.me;
+  R.t += dt; if (S.cams) return renderCams(S); const t = R.t, me = S.me;
   zoom = clamp(H / 760, 0.55, 1.7) * (1 + R.zoomKick * 0.05); R.zoomKick = Math.max(0, R.zoomKick - dt * 3);
-  const k = 1 - Math.exp(-6 * dt); R.cam.x += (me.x - R.cam.x) * k; R.cam.y += (me.y - R.cam.y) * k;
+  const vpos = S.view || me, k = 1 - Math.exp(-6 * dt); R.cam.x += (vpos.x - R.cam.x) * k; R.cam.y += (vpos.y - R.cam.y) * k;
   const vw = W / zoom / 2, vh = H / zoom / 2;
   R.cam.x = vw * 2 >= WORLD.w ? WORLD.w / 2 : clamp(R.cam.x, vw, WORLD.w - vw); R.cam.y = vh * 2 >= WORLD.h ? WORLD.h / 2 : clamp(R.cam.y, vh, WORLD.h - vh);
   R.shake = Math.max(0, R.shake - dt * 22);
@@ -180,6 +180,12 @@ export function render(S, dt) {
   }
   // ventilações, estações e pontos especiais
   for (const v of VENTS) if (vis(v.x - 30, v.y - 30, 60, 60)) { ctx.fillStyle = '#10182e'; rr(ctx, v.x - 24, v.y - 14, 48, 28, 5); ctx.fill(); ctx.strokeStyle = '#586a94'; ctx.lineWidth = 2; for (let i = -16; i <= 16; i += 8) { ctx.beginPath(); ctx.moveTo(v.x + i, v.y - 12); ctx.lineTo(v.x + i, v.y + 12); ctx.stroke(); } }
+  for (const c of CAMS) { // câmeras de segurança nas paredes (LED vermelho quando alguém assiste)
+    const x = c.x, y = c.y; if (!vis(x - 30, y - 30, 60, 60)) continue;
+    ctx.fillStyle = '#1b2440'; rr(ctx, x - 9, y - 5, 18, 12, 4); ctx.fill(); ctx.fillStyle = '#8fa3c8'; ctx.beginPath(); ctx.arc(x, y + 2, 6, 0, TAU); ctx.fill(); ctx.fillStyle = '#0b1226'; ctx.beginPath(); ctx.arc(x, y + 3, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = S.camsOn ? '#ff3b52' : '#6bd968'; ctx.globalAlpha = S.camsOn ? (Math.sin(t * 8) > 0 ? 1 : 0.25) : 0.35 + 0.25 * Math.sin(t * 2); ctx.beginPath(); ctx.arc(x + 8, y - 5, 2.4, 0, TAU); ctx.fill(); ctx.globalAlpha = 1;
+  }
+  { const cs = SPECIAL.camConsole; if (vis(cs.x - 40, cs.y - 50, 80, 80)) { ctx.fillStyle = 'rgba(0,0,0,.3)'; rr(ctx, cs.x - 24, cs.y - 6, 52, 30, 6); ctx.fill(); ctx.fillStyle = '#44445f'; rr(ctx, cs.x - 26, cs.y - 10, 52, 30, 6); ctx.fill(); ctx.fillStyle = '#080d1a'; rr(ctx, cs.x - 21, cs.y - 36, 42, 26, 4); ctx.fill(); ctx.fillStyle = '#ff4f6d'; ctx.globalAlpha = 0.55 + 0.25 * Math.sin(t * 3); rr(ctx, cs.x - 18, cs.y - 33, 36, 20, 3); ctx.fill(); ctx.globalAlpha = 1; ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('CAM', cs.x, cs.y - 19); } }
   const mine = S.myTasks;
   for (const s of STATIONS) if (vis(s.x - 40, s.y - 60, 80, 90)) {
     const tk = mine.find(q => q.id === s.id), on = tk && !tk.done;
@@ -207,9 +213,9 @@ export function render(S, dt) {
   for (let i = P.length - 1; i >= 0; i--) { const p = P[i]; p.life -= dt; if (p.life <= 0) { P.splice(i, 1); continue; } p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; ctx.globalAlpha = Math.min(1, p.life / p.max * 1.5); ctx.fillStyle = p.col; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.5 + p.life / p.max * 0.5), 0, TAU); ctx.fill(); }
   ctx.globalAlpha = 1;
   // iluminação (campo de visão)
-  if (me.alive) {
+  if (me.alive || S.view) {
     const target = S.vr || 420; R.vis += (target - R.vis) * Math.min(1, dt * (target < R.vis ? 5 : 2));
-    const s = lc.width / W, [mx, my] = toScreen(me.x, me.y - 20), rad = R.vis * zoom * s * (sabL ? 0.9 + Math.random() * 0.15 : 1);
+    const s = lc.width / W, [mx, my] = toScreen(vpos.x, vpos.y - 20), rad = R.vis * zoom * s * (sabL ? 0.9 + Math.random() * 0.15 : 1);
     lx.globalCompositeOperation = 'source-over'; lx.fillStyle = 'rgba(3,5,14,.965)'; lx.fillRect(0, 0, lc.width, lc.height);
     lx.globalCompositeOperation = 'destination-out'; const g = lx.createRadialGradient(mx * s, my * s, rad * 0.3, mx * s, my * s, rad); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.75, 'rgba(0,0,0,.85)'); g.addColorStop(1, 'rgba(0,0,0,0)'); lx.fillStyle = g; lx.beginPath(); lx.arc(mx * s, my * s, rad, 0, TAU); lx.fill();
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(lc, 0, 0, W, H);
@@ -220,11 +226,37 @@ export function render(S, dt) {
   // efeitos de tela
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   for (const a of S.arrows || []) {
+    if (a.ang !== undefined) { // seta só de direção (ex.: dentro do duto)
+      ctx.fillStyle = a.col; ctx.strokeStyle = 'rgba(5,8,20,.9)'; ctx.lineWidth = 3; ctx.save(); ctx.translate(W / 2 + Math.cos(a.ang) * (W / 2 - 58), H / 2 + Math.sin(a.ang) * (H / 2 - 58)); ctx.rotate(a.ang); ctx.scale(a.s || 1, a.s || 1);
+      ctx.beginPath(); ctx.moveTo(18, 0); ctx.lineTo(-10, -13); ctx.lineTo(-4, 0); ctx.lineTo(-10, 13); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore(); continue;
+    }
     const [ax, ay] = toScreen(a.x, a.y), m = 46, on = ax > m && ax < W - m && ay > m && ay < H - m; ctx.fillStyle = a.col; ctx.strokeStyle = 'rgba(5,8,20,.9)'; ctx.lineWidth = 3;
-    if (on) { const by = ay - 40 + Math.sin(R.t * 5) * 5; ctx.beginPath(); ctx.moveTo(ax - 10, by - 12); ctx.lineTo(ax + 10, by - 12); ctx.lineTo(ax, by); ctx.closePath(); ctx.stroke(); ctx.fill(); }
-    else { const ang = Math.atan2(ay - H / 2, ax - W / 2); ctx.save(); ctx.translate(Math.max(m, Math.min(W - m, ax)), Math.max(m, Math.min(H - m, ay))); ctx.rotate(ang); ctx.beginPath(); ctx.moveTo(18, 0); ctx.lineTo(-10, -13); ctx.lineTo(-4, 0); ctx.lineTo(-10, 13); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore(); }
+    if (on) { if (a.edge) continue; const by = ay - 40 + Math.sin(R.t * 5) * 5; ctx.beginPath(); ctx.moveTo(ax - 10, by - 12); ctx.lineTo(ax + 10, by - 12); ctx.lineTo(ax, by); ctx.closePath(); ctx.stroke(); ctx.fill(); }
+    else { const ang = Math.atan2(ay - H / 2, ax - W / 2); ctx.save(); ctx.translate(Math.max(m, Math.min(W - m, ax)), Math.max(m, Math.min(H - m, ay))); ctx.rotate(ang); ctx.scale(a.s || 1, a.s || 1); ctx.beginPath(); ctx.moveTo(18, 0); ctx.lineTo(-10, -13); ctx.lineTo(-4, 0); ctx.lineTo(-10, 13); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore(); }
   }
   if (S.sab?.k === 'heat') { const a = 0.18 + 0.14 * Math.sin(t * 6), g = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85); g.addColorStop(0, 'rgba(255,40,60,0)'); g.addColorStop(1, `rgba(255,40,60,${a + 0.2})`); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
   if (S.sab?.k === 'comms') { ctx.fillStyle = 'rgba(120,180,255,.05)'; for (let i = 0; i < 6; i++) ctx.fillRect(0, Math.random() * H, W, 2); }
   if (R.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${R.flash})`; ctx.fillRect(0, 0, W, H); R.flash = Math.max(0, R.flash - dt * 2.5); }
+}
+
+// ---------- monitor das câmeras de segurança (4 imagens ao mesmo tempo) ----------
+const FB = { c: 0, h: 0, o: 0, a: 0, m: 0, s: 0 };
+function renderCams(S) {
+  const t = R.t; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#02060a'; ctx.fillRect(0, 0, W, H);
+  const gap = 14, bar = 76, cw = (W - gap * 3) / 2, ch = (H - gap * 3 - bar) / 2, z = Math.min(cw, ch) / 600;
+  CAMS.forEach((c, i) => {
+    const cx = gap + (i % 2) * (cw + gap), cy = gap + Math.floor(i / 2) * (ch + gap), feed = S.cams[i] || [[], []];
+    ctx.save(); ctx.beginPath(); ctx.rect(cx, cy, cw, ch); ctx.clip(); ctx.fillStyle = '#060a16'; ctx.fillRect(cx, cy, cw, ch);
+    ctx.translate(cx + cw / 2 - c.vx * z, cy + ch / 2 - c.vy * z); ctx.scale(z, z);
+    const x0 = c.vx - cw / 2 / z - 40, x1 = c.vx + cw / 2 / z + 40, y0 = c.vy - ch / 2 / z - 40, y1 = c.vy + ch / 2 / z + 40, hit = r => r.x + r.w + 20 > x0 && r.x - 20 < x1 && r.y + r.h + 20 > y0 && r.y - 20 < y1;
+    ctx.fillStyle = '#0d1426'; for (const r of RECTS) if (hit(r)) ctx.fillRect(r.x - 18, r.y - 18, r.w + 36, r.h + 36);
+    for (const r of RECTS) if (hit(r)) ctx.drawImage(BAKE.get(r.id) || bake(r), r.x, r.y);
+    for (const b of feed[1]) { ctx.save(); ctx.translate(b[1], b[2]); ctx.rotate(1.35); drawCrew(ctx, (S.roster.get(b[0]) || { look: FB }).look, 0, 14, { t, dead: true }); ctx.restore(); }
+    for (const p of feed[0].slice().sort((a, b) => a[2] - b[2])) drawCrew(ctx, (S.roster.get(p[5]) || S.roster.get(p[0]) || { look: FB }).look, p[1], p[2], { t: t + p[0], moving: !!p[4], face: p[3] });
+    ctx.restore();
+    ctx.fillStyle = 'rgba(30,90,50,.16)'; ctx.fillRect(cx, cy, cw, ch); ctx.fillStyle = 'rgba(0,0,0,.12)'; for (let y = cy; y < cy + ch; y += 4) ctx.fillRect(cx, y, cw, 2);
+    ctx.strokeStyle = '#2a4a3a'; ctx.lineWidth = 2; ctx.strokeRect(cx, cy, cw, ch);
+    ctx.font = '800 18px "Baloo 2",sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = '#e9f1ff'; ctx.fillText(`CAM ${i + 1} · ${c.name}`, cx + 14, cy + 28);
+    if (Math.sin(t * 4 + i) > 0) { ctx.fillStyle = '#ff3b52'; ctx.beginPath(); ctx.arc(cx + cw - 22, cy + 22, 7, 0, TAU); ctx.fill(); }
+  });
 }

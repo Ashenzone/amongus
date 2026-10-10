@@ -34,7 +34,7 @@ export const PARAMS = [
   P('jui_uses', 'Juiz/Mentalista: usos do Voto Supremo', 1, 3, 1, 1, 'Juiz'),
   P('loc_cd', 'Localizador: recarga (s)', 5, 90, 1, 25, 'Localizador'), P('loc_dur', 'Localizador: duração do rastreio (s)', 10, 120, 5, 40, 'Localizador'),
   P('xer_cd', 'Xerife/Mentalista: recarga do tiro (s)', 10, 90, 1, 30, 'Xerife'),
-  P('men_inv', 'Mentalista: tempo parado na sondagem (s)', 2, 15, 1, 5, 'Mentalista'),
+  P('men_inv', 'Mentalista: tempo parado na sondagem (s)', 2, 15, 1, 5, 'Mentalista'), P('men_cd', 'Mentalista: recarga da sondagem (s)', 5, 90, 1, 15, 'Mentalista'), P('men_cd', 'Mentalista: recarga da sondagem (s)', 5, 120, 5, 20, 'Mentalista'),
   P('anj_dur', 'Anjo: duração do escudo (s)', 10, 120, 5, 60, 'Anjo'), P('anj_cd', 'Anjo: espera extra após o escudo (s)', 0, 60, 5, 0, 'Anjo'),
   P('inf_uses', 'Influencer: mensagens por reunião', 1, 3, 1, 1, 'Influencer'),
   P('vib_van', 'Víbora: sumiço do corpo (s)', 2, 20, 1, 5, 'Víbora'),

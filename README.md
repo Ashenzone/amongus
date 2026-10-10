@@ -28,6 +28,10 @@ WASD/setas mover · E usar/tarefa/reparar/emergência · R reportar · Q elimina
 Início da partida: Carregando → Categoria → Profissão. Habilidades: botões na tela (teclas 1–4), M abre o mapa grande (rastreio do Localizador).
 O host configura no lobby (botão PROFISSÕES): chance e máximo de cada profissão, nº de neutros/impostores, recargas, durações, usos e regras de cada habilidade; chance 0 desliga a profissão.
 
+## Câmeras e setas
+- **Câmeras de segurança:** console na Sala de Segurança (E). Mostra 4 imagens ao vivo (Sala Central, Corredor do Laboratório, Corredor Leste, Armazém). Os aparelhos nas paredes ficam com LED vermelho piscando quando alguém assiste. A sabotagem de comunicação derruba as câmeras. Quem assiste fica parado.
+- **Setas:** azuis = tarefas pendentes (configurável em Configurações: todas / 3 mais próximas / desligadas); vermelha = onde consertar a sabotagem; rosa = corpo do Barulhento; amarela = alvo do Localizador; vermelhas dentro do duto = direção dos outros jogadores.
+
 ## Segurança (servidor manda)
 Função, posição, kill (alcance/cooldown), votos, tarefas, sabotagens e vitória são validados no servidor. O servidor só envia posições de quem está dentro do campo de visão (sem wallhack) e a função dos infiltrados só vai aos próprios infiltrados. Tarefas exigem proximidade + tempo mínimo desde o início.
 Limite conhecido: o resultado do minigame roda no cliente; o servidor garante proximidade e tempo, não a correção da solução.

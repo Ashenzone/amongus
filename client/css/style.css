@@ -113,3 +113,12 @@ input:focus{border-color:var(--teal)}
 
 /* Safari/iOS: permitir digitar nos campos mesmo com user-select:none no body */
 input{-webkit-user-select:text;user-select:text}
+
+/* câmeras, introdução escura e ejeção */
+#hCap{display:block;color:var(--dim);font-size:13px;margin-bottom:4px}
+#hud.incam{display:none}
+#camUI{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:9;display:flex;gap:12px;align-items:center;background:var(--pan);border:2px solid #ff3b52;border-radius:16px;padding:10px 16px;font-weight:700;font-size:18px}
+#camUI button{background:#1b2a55;border:2px solid var(--line);border-radius:10px;color:#fff;font:inherit;padding:6px 16px;cursor:pointer}#camUI button:hover{border-color:#ff3b52}#cName{min-width:230px;text-align:center}
+#intro{background:#02030a}#intro>div,#intro>small{animation:pop .6s ease-out both}@keyframes pop{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:none}}
+#eject canvas{position:absolute;inset:0;width:100%;height:100%}#eject .etext{position:relative;z-index:1;white-space:pre-line;line-height:1.25;text-shadow:0 0 22px #000,0 0 6px #000;margin-top:34vh}
+#camUI{gap:18px}#camUI span{color:#ff3b52}

@@ -4,19 +4,19 @@ import { initRender, render, R, fx, addShake, setQuality } from './render.js';
 import { initAudio, A, sfx, alarm } from './audio.js';
 import { openTask, TASK_MIN } from './tasks.js';
 import * as UI from './ui.js';
-import { ROOMS, RECTS, STATIONS, VENTS, SPECIAL, canStand, WORLD } from '/shared/map.js';
+import { ROOMS, RECTS, STATIONS, VENTS, SPECIAL, CAMS, canStand, WORLD } from '/shared/map.js';
 import { sanitizeName } from '/shared/cosmetics.js';
 import { JOB, TEAMS, ABIL, INF_MSGS } from '/shared/jobs.js';
 
 const $ = id => document.getElementById(id);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-const P = Object.assign({ name: '', look: { c: Math.floor(Math.random() * 12), h: 0, o: 0, a: 0, m: 0, s: 0 }, vol: { ...A.vol }, q: 1 }, JSON.parse(localStorage.getItem('quorum.p') || '{}'));
+const P = Object.assign({ name: '', look: { c: Math.floor(Math.random() * 12), h: 0, o: 0, a: 0, m: 0, s: 0 }, vol: { ...A.vol }, q: 1, arr: 0 }, JSON.parse(localStorage.getItem('quorum.p') || '{}'));
 const save = () => localStorage.setItem('quorum.p', JSON.stringify(P));
 Object.assign(A.vol, P.vol); setQuality(P.q);
 
 const S = { phase: 'menu', id: null, roster: new Map(), role: null, mates: new Set(), me: { x: SPECIAL.spawn.x, y: SPECIAL.spawn.y, alive: false, vent: -1, moving: false, face: 1 },
   players: new Map(), bodies: [], myTasks: [], sab: null, vr: 900, look: P.look, name: P.name, acting: 0, cd: [0, 0], intro: 0, tk: [0, 1], settings: { speed: 1, emergencies: 1 },
-  emergUsed: 0, hideMe: true, lobby: null, onDoor: () => sfx('door'), job: null, team: null, ghostJob: null, target: null, known: new Map(), ab: { cd: {}, act: {}, us: {}, sup: 0 }, arrows: [], loc: null, probe: null, meInv: false, meShield: 0, sup: 0, supMode: false, _ej: null };
+  emergUsed: 0, hideMe: true, lobby: null, onDoor: () => sfx('door'), job: null, team: null, ghostJob: null, target: null, known: new Map(), ab: { cd: {}, act: {}, us: {}, sup: 0 }, arrows: [], loc: null, probe: null, meInv: false, meShield: 0, sup: 0, supMode: false, _ej: null, cams: null, camsOn: false, view: null, introEnd: 0 };
 const send = o => net.send(o);
 initRender($('game'));
 
@@ -66,7 +66,7 @@ function begin(m, resume) {
   const mine = S.roster.get(S.id); S.look = mine.look; S.name = mine.name; S.hideMe = false; S.vr = 420; R.cam.x = m.x; R.cam.y = m.y; R.vis = 420;
   go(null); $('hud').classList.remove('hide'); $('sabMenu').classList.add('hide');
   const imp = S.role === 'imp'; document.querySelectorAll('#bSab,#bKill').forEach(b => b.classList.toggle('hide', !imp)); $('bigmap').classList.add('hide');
-  if (!resume) intro();
+  if (!resume) { $('hud').classList.add('hide'); S.introEnd = performance.now() + 4300; intro(); } else S.introEnd = 0;
   hudTasks(); buildAbil();
 }
 net.on('start', m => begin(m, false));
@@ -80,7 +80,7 @@ function intro() {
     let extra = J.desc; if (S.team === 'imp') { const al = [...S.known].filter(([i]) => i !== S.id).map(([i, j]) => `${S.roster.get(i)?.name} (${JOB[j].name})`); if (al.length) extra += ` Aliados: ${al.join(', ')}.`; }
     if (S.job === 'execution') extra += ` Seu alvo: ${S.roster.get(S.target)?.name || '?'}.`; scene(J.name.toUpperCase(), col, extra); sfx('ok');
   }, 2300);
-  setTimeout(() => e.classList.remove('on'), 4100);
+  setTimeout(() => { e.classList.remove('on'); if (S.phase === 'play') $('hud').classList.remove('hide'); }, 4100);
 }
 net.on('snap', m => {
   if (S.phase !== 'play') return;
@@ -94,7 +94,8 @@ net.on('snap', m => {
   for (const id of [...S.players.keys()]) if (!seen.has(id)) S.players.delete(id);
   S.bodies = m.bd.map(([id, bx, by, bg]) => ({ id, x: bx, y: by, g: !!bg, look: (S.roster.get(id) || { look: P.look }).look }));
   const hadSab = S.sab; S.sab = m.sab; S.vr = m.vr; S.cd = m.cd || [0, 0]; S.tk = m.tk; S.intro = m.intro; S.ab = m.ab; S.loc = m.loc; S.probe = m.probe; S.sup = m.ab.sup;
-  S.arrows = [...m.ar.map(([ax, ay]) => ({ x: ax, y: ay, col: '#ff4f6d' })), ...(m.loc ? [{ x: m.loc[0], y: m.loc[1], col: '#ffd23d' }] : [])];
+  S.cams = m.cams || null; S.camsOn = !!m.co; $('hud').classList.toggle('incam', !!m.cams); $('camUI').classList.toggle('hide', !m.cams);
+  S.arrows = buildArrows(m, vent);
   if (!!hadSab !== !!S.sab || hadSab?.k !== S.sab?.k) alarm(S.sab?.k === 'heat');
 });
 net.on('taskOk', m => { const t = S.myTasks.find(q => q.id === m.id); if (t) t.done = true; hudTasks(); });
@@ -105,7 +106,7 @@ net.on('sabPart', () => sfx('fixed'));
 net.on('sabEnd', () => { sfx('fixed'); UI.toast('Sistema restaurado.'); });
 net.on('meeting', m => {
   S.phase = 'meet'; closeTaskUi(); alarm(false); S.sab = null; S.bodies = []; $('hud').classList.add('hide'); $('intro').classList.remove('on'); sfx(m.reason === 'body' ? 'report' : 'meeting'); addShake(6);
-  UI.openMeeting(m, { roster: S.roster, alive: S.me.alive }); S.arrows = []; S.loc = null; S.supMode = false; $('mSup').hidden = true; $('bigmap').classList.add('hide'); buildMeetAb();
+  UI.openMeeting(m, { roster: S.roster, alive: S.me.alive }); S.arrows = []; S.loc = null; S.supMode = false; S.cams = null; $('camUI').classList.add('hide'); $('hud').classList.remove('incam'); $('mSup').hidden = true; $('bigmap').classList.add('hide'); buildMeetAb();
 });
 net.on('phase', m => { S.phase = 'vote'; UI.startVote(m.time); sfx('vote'); $('mSup').hidden = !(S.sup > 0 && S.me.alive); $('mSup').classList.remove('main'); });
 net.on('voted', m => { UI.markVoted(m.id); sfx('click'); });
@@ -125,7 +126,7 @@ net.on('close', () => {
 const keys = new Set(); let closeTask = null, lastIn = '', inT = 0;
 const closeTaskUi = () => { closeTask?.(false); closeTask = null; };
 addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return; keys.add(e.code); if (S.phase !== 'play' || closeTask || S.intro > 0) return;
+  if (e.target.tagName === 'INPUT') return; keys.add(e.code); if (S.phase !== 'play' || closeTask || S.intro > 0 || performance.now() < S.introEnd) return; if (S.cams) { camKey(e.code); return; }
   ({ Digit1: () => abilN(0), Digit2: () => abilN(1), Digit3: () => abilN(2), Digit4: () => abilN(3), KeyM: toggleMap, KeyE: doUse, KeyR: doReport, KeyQ: doKill, KeyV: doVent, KeyC: () => S.me.vent >= 0 && send({ t: 'vent', a: 'next' }), KeyF: () => S.role === 'imp' && $('sabMenu').classList.toggle('hide') })[e.code]?.();
 });
 addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
@@ -144,6 +145,7 @@ function nearAction() {
   let best = null, bd = 90;
   for (const t of S.myTasks) if (!t.done) { const s = STATIONS.find(q => q.id === t.id), d = dist(me, s); if (d < bd) { bd = d; best = { label: 'TAREFA', run: () => startTask(t) }; } }
   if (best) return best;
+  if (me.alive && !S.cams && dist(me, SPECIAL.camConsole) < 90) return { label: 'CÂMERAS', run: () => send({ t: 'ab', a: 'cam' }) };
   if (me.alive && dist(me, SPECIAL.emergency) < 100 && S.emergUsed < S.settings.emergencies && S.sab?.k !== 'heat') return { label: 'EMERGÊNCIA', run: () => { S.emergUsed++; send({ t: 'emergency' }); } };
   return null;
 }
@@ -170,7 +172,7 @@ function hudTasks() {
 let hudT = 0;
 function hud(dt) {
   if ((hudT -= dt) > 0) return; hudT = 0.1; const sab = S.sab, imp = S.role === 'imp', me = S.me;
-  $('hBar').style.width = (S.tk[1] ? (S.tk[0] / S.tk[1]) * 100 : 0) + '%';
+  $('hBar').style.width = (S.tk[1] ? (S.tk[0] / S.tk[1]) * 100 : 0) + '%'; $('hCap').textContent = `Progresso da equipe: ${S.tk[0]}/${S.tk[1]} tarefas`;
   setObj(me);
   const sb = $('hSab'); sb.classList.toggle('hide', !sab);
   if (sab) sb.textContent = sab.k === 'lights' ? 'APAGÃO — restaure a energia nos Geradores' : sab.k === 'comms' ? 'COMUNICAÇÃO INTERROMPIDA — vá a Comunicações' : `SUPERAQUECIMENTO ${sab.t}s — repare em Engenharia e Sala de Controle`;
@@ -196,7 +198,7 @@ function update(dt) {
     A.tension += (0 - A.tension) * dt; return;
   }
   let ix = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0), iy = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
-  if (closeTask || S.intro > 0 || me.vent >= 0) ix = iy = 0;
+  if (closeTask || S.intro > 0 || me.vent >= 0 || S.cams || performance.now() < S.introEnd) ix = iy = 0;
   const key = ix + ',' + iy; inT -= dt; if (key !== lastIn || inT <= 0) { send({ t: 'input', x: ix, y: iy }); lastIn = key; inT = 0.1; }
   const l = Math.hypot(ix, iy); me.moving = l > 0;
   if (l) {
@@ -228,7 +230,7 @@ function updAbil(me) {
   if (S._ej !== effJob()) { S._ej = effJob(); buildAbil(); }
   for (const b of $('abil').children) {
     const id = b.dataset.id, cd = ab.cd[id] | 0, act = ab.act[id] | 0, tg = nearP(95); let dis = cd > 0, txt = cd ? cd + 's' : b.dataset.k;
-    if (id === 'investigate') dis = dis || !bodyNear(); if (id === 'skill' || id === 'probe') dis = dis || !tg; if (id === 'remoteFix') dis = dis || !S.sab;
+    if (id === 'investigate') dis = dis || !bodyNear(); if (id === 'skill' || id === 'probe') dis = dis || !tg; if (id === 'remoteFix') dis = dis || !S.sab; if (id === 'probe') dis = dis || !!S.probe;
     if (id === 'panel') { dis = !(ab.us.panel > 0); txt = 'x' + (ab.us.panel | 0); } if (id === 'infmsg') { dis = !(ab.us.inf > 0); txt = 'x' + (ab.us.inf | 0); }
     if ((id === 'morph' || id === 'invis') && act > 0) { dis = false; txt = act + 's'; } if (id === 'locate' && act > 0) txt = act + 's';
     b.disabled = dis; b.classList.toggle('rdy', !dis); b.querySelector('small').textContent = txt;
@@ -246,7 +248,7 @@ function useAbility(id) {
 }
 function setObj(me) {
   const o = $('hObj'), j = JOB[S.job]; o.textContent = ''; const b = document.createElement('b'); b.textContent = j.name; b.style.color = j.color === '#111419' ? '#e9f1ff' : j.color;
-  let rest = !me.alive ? ' — fantasma' + (S.ghostJob ? ` (${JOB[S.ghostJob].name})` : '') : S.team === 'imp' ? ' — elimine sem ser descoberto' : S.job === 'joker' ? ' — faça-os votar em você' : S.job === 'execution' ? ` — ejete ${S.roster.get(S.target)?.name || 'o alvo'}` : S.team === 'neu' ? '' : ` — tarefas (${S.tk[0]}/${S.tk[1]})`;
+  let rest = !me.alive ? ' — fantasma' + (S.ghostJob ? ` (${JOB[S.ghostJob].name})` : '') : S.team === 'imp' ? ' — elimine sem ser descoberto' : S.job === 'joker' ? ' — faça-os votar em você' : S.job === 'execution' ? ` — ejete ${S.roster.get(S.target)?.name || 'o alvo'}` : S.team === 'neu' ? '' : ` — suas tarefas ${S.myTasks.filter(t => t.done).length}/${S.myTasks.length}`;
   if (S.probe) rest += ` · sondando ${Math.round(S.probe[1] * 100)}%`; o.append(b, document.createTextNode(rest));
 }
 const big = $('bigmap'), bc = big.getContext('2d'), bs = big.width / WORLD.w;
@@ -262,6 +264,24 @@ function drawBig() {
 }
 S.nameColor = p => (p.me ? JOB[S.job]?.color : S.known.has(p.id) ? JOB[S.known.get(p.id)].color : null);
 S.tagOf = p => (!p.me && S.known.has(p.id) ? JOB[S.known.get(p.id)].name : null);
+// ---------- setas indicadoras e câmeras ----------
+function buildArrows(m, vent) {
+  const out = m.ar.map(([x, y]) => ({ x, y, col: '#ff7ac8' })); // corpo do Barulhento
+  if (m.loc) out.push({ x: m.loc[0], y: m.loc[1], col: '#ffd23d' });
+  if (P.arr !== 2 && !m.cams) { // azuis: tarefas pendentes
+    let ts = S.myTasks.filter(t => !t.done).map(t => STATIONS.find(s => s.id === t.id)); if (P.arr === 1) ts = ts.sort((a, b) => dist(S.me, a) - dist(S.me, b)).slice(0, 3);
+    for (const s of ts) out.push({ x: s.x, y: s.y, col: '#4aa8ff', edge: true, s: 0.8 });
+  }
+  if (m.sab) { // vermelhas: onde consertar a sabotagem
+    const k = m.sab.k, pts = k === 'lights' ? [SPECIAL.lights] : k === 'comms' ? [SPECIAL.comms] : [!m.sab.fixed[0] && SPECIAL.heatA, !m.sab.fixed[1] && SPECIAL.heatB].filter(Boolean);
+    for (const p of pts) out.push({ x: p.x, y: p.y, col: '#ff3b52', edge: true });
+  }
+  if (vent >= 0 && m.vd) for (const ang of m.vd) out.push({ ang, col: '#ff3b52', s: 0.9 }); // dentro do duto: direção dos outros
+  return out;
+}
+function camKey(code) { if (['KeyE', 'Escape', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) send({ t: 'ab', a: 'camOff' }); }
+$('cExit').onclick = () => send({ t: 'ab', a: 'camOff' });
+net.on('camOff', () => { S.cams = null; $('camUI').classList.add('hide'); $('hud').classList.remove('incam'); UI.toast('Câmeras fora do ar.'); });
 net.on('hint', m => UI.toast(m.text, 7000));
 net.on('panel', m => UI.pick('Painel do Cientista', m.list.map(([id, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: al ? 'VIVO' : 'MORTO' })), null));
 net.on('reveal', m => { for (const [id, j] of m.list) S.known.set(id, j); UI.toast(m.all ? 'Todas as profissões foram reveladas!' : `Descoberto: ${S.roster.get(m.list[0][0])?.name} é ${JOB[m.list[0][1]].name}.`, 6000); sfx('ok'); });
