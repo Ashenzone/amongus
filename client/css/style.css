@@ -122,3 +122,4 @@ input{-webkit-user-select:text;user-select:text}
 #intro{background:#02030a}#intro>div,#intro>small{animation:pop .6s ease-out both}@keyframes pop{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:none}}
 #eject canvas{position:absolute;inset:0;width:100%;height:100%}#eject .etext{position:relative;z-index:1;white-space:pre-line;line-height:1.25;text-shadow:0 0 22px #000,0 0 6px #000;margin-top:34vh}
 #camUI{gap:18px}#camUI span{color:#ff3b52}
+.jrow textarea{width:100%;background:rgba(5,9,22,.8);border:2px solid var(--line);border-radius:12px;color:var(--txt);font:inherit;font-size:16px;padding:8px 12px;outline:none;resize:vertical;user-select:text;-webkit-user-select:text;margin-top:6px}.jrow textarea:focus{border-color:var(--teal)}.jrow textarea:disabled{opacity:.6}

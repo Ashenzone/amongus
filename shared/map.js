@@ -74,3 +74,4 @@ export const CAMS = [
   { name: 'Corredor Leste', x: 2000, y: 892, vx: 2000, vy: 930 },
   { name: 'Armazém', x: 1500, y: 1392, vx: 1500, vy: 1560 },
 ];
+export const TASK_MIN = { wires: 2000, code: 2200, calibrate: 1500, fuel: 3200, reboot: 2000, order: 2200 }; // tempo mínimo (ms) por tipo de tarefa

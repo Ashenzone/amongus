@@ -31,6 +31,13 @@ O host configura no lobby (botão PROFISSÕES): chance e máximo de cada profiss
 ## Mentalista
 Tem dois painéis: **PAINEL** (igual ao do Cientista: vivo/morto, usos por reunião) e **PROFISSÕES** (desbloqueia ao completar todas as tarefas; mostra nome, profissão e vivo/morto de todos; só abre durante as reuniões). A sondagem individual continua revelando a profissão de quem ficar parado.
 
+## Bots inteligentes
+No lobby: PROFISSÕES → aba **🤖 Bots** (ativar, quantidade, nomes e 14 parâmetros de comportamento). `server/bot.js` (cérebro) e `server/nav.js` (navegação A*).
+- Bots entram na partida como jogadores normais, com os nomes definidos pelo admin (sem duplicar; vazio = nomes automáticos) e nada os identifica como bots.
+- Recebem as mesmas mensagens de um cliente (visão limitada, avisos, chat) e agem pelas mesmas mensagens (mover, kill, votar, habilidades), então regras, profissões e recargas são idênticas às dos humanos. Não leem o estado dos outros jogadores no servidor.
+- Objetivos por prioridade: reportar corpo, consertar sabotagem, fugir, caçar/seguir, tarefas (reais ou fingidas), explorar, câmeras. Memória de suspeitas (quem estava perto do corpo, sumiu perto de duto, mudou de aparência, última companhia da vítima, pistas das habilidades, acusações no chat) usada no chat e no voto.
+- Parâmetros: habilidade, erro, reação, hesitação, grupo, tarefas, suspeita, câmeras, habilidades, agressividade, sabotagem, mentira, conversa.
+
 ## Câmeras e setas
 - **Câmeras de segurança:** console na Sala de Segurança (E). Mostra 4 imagens ao vivo (Sala Central, Corredor do Laboratório, Corredor Leste, Armazém). Os aparelhos nas paredes ficam com LED vermelho piscando quando alguém assiste. A sabotagem de comunicação derruba as câmeras. Quem assiste fica parado.
 - **Setas:** azuis = tarefas pendentes (configurável em Configurações: todas / 3 mais próximas / desligadas); vermelha = onde consertar a sabotagem; rosa = corpo do Barulhento; amarela = alvo do Localizador; vermelhas dentro do duto = direção dos outros jogadores.

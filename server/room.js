@@ -1,6 +1,7 @@
 // Sala/partida autoritativa. O cliente só envia intenções; tudo é validado aqui.
 import crypto from 'node:crypto';
-import { WORLD, canStand, STATIONS, VENTS, SPECIAL, CAMS, roomAt } from '../shared/map.js';
+import { WORLD, canStand, STATIONS, VENTS, SPECIAL, CAMS, TASK_MIN, roomAt } from '../shared/map.js';
+import { Bot } from './bot.js';
 import { sanitizeLook, sanitizeName } from '../shared/cosmetics.js';
 import { JOBS, JOB, DEFAULT_SETTINGS, SETTING_LIMITS, colorTone, INF_MSGS } from '../shared/jobs.js';
 
@@ -8,7 +9,7 @@ export const MIN_PLAYERS = +process.env.MIN_PLAYERS || 4;
 const MAX_PLAYERS = 15;
 const BASE_SPEED = 190, BASE_VIS = 420, KILL_R = 95, REPORT_R = 150, TASK_R = 110, FIX_R = 110, VENT_R = 80, PROBE_R = 110, CAM_R = 300;
 const DC_GRACE = 45, SAB_CD = 30, HEAT_TIME = 45, INTRO = 4.2, RESULT_TIME = 8, END_TIME = 12;
-const TASK_MIN = { wires: 2000, code: 2200, calibrate: 1500, fuel: 3200, reboot: 2000, order: 2200 };
+const GEN_NAMES = ['Ashen', 'Shadow', 'Nexus', 'Ghost', 'Dark', 'Lunar', 'Venom', 'Zero', 'Pixel', 'Orion', 'Blaze', 'Echo', 'Nova', 'Rift', 'Onyx', 'Frost', 'Vortex', 'Comet', 'Rogue', 'Mira', 'Kairo', 'Luna', 'Thor', 'Zeca', 'Duda', 'Bruno', 'Lari', 'Gabs', 'Tiago', 'Nina', 'Kiko', 'Rafa', 'Bia', 'Dani', 'Leo', 'Mel', 'Pedro', 'Sol', 'Vini', 'Yuri'];
 const DEFAULTS = { impostors: 0, speed: 1, vision: 1, discuss: 30, vote: 30, tasks: 4, killCd: 22, emergencies: 1, confirm: 1, ...DEFAULT_SETTINGS };
 const LIMITS = { impostors: [0, 3], speed: [0.75, 1.5], vision: [0.5, 1.5], discuss: [10, 120], vote: [10, 120], tasks: [1, 8], killCd: [10, 45], emergencies: [0, 3], confirm: [0, 1], ...SETTING_LIMITS };
 
@@ -21,10 +22,10 @@ const dec = (o, dt, fn) => { for (const k in o) { o[k] -= dt; if (o[k] <= 0) { d
 export class Room {
   constructor(code, onEmpty) {
     Object.assign(this, { code, onEmpty, players: new Map(), hostId: null, settings: { ...DEFAULTS }, pub: false,
-      phase: 'lobby', bodies: [], sab: null, sabCd: 0, timer: 0, loop: null, n: 0, nextId: 1, last: Date.now(), meet: null, supreme: null, ghostN: {} });
+      phase: 'lobby', bodies: [], sab: null, sabCd: 0, timer: 0, loop: null, n: 0, nextId: 1, last: Date.now(), meet: null, supreme: null, ghostN: {}, botText: '' });
   }
   get list() { return [...this.players.values()]; }
-  send(p, m) { if (p.ws && p.ws.readyState === 1) p.ws.send(JSON.stringify(m)); }
+  send(p, m) { if (p.bot) { try { p.ai.onMsg(m); } catch (e) { console.error('[bot]', e); } return; } if (p.ws && p.ws.readyState === 1) p.ws.send(JSON.stringify(m)); }
   all(m, f) { for (const p of this.players.values()) if (!f || f(p)) this.send(p, m); }
   alive(role) { return this.list.filter(p => p.alive && !p.gone && (!role || (role === 'imp') === (p.role === 'imp'))); }
   canVent(p) { return p.team === 'imp' || p.job === 'engenheiro'; }
@@ -33,10 +34,7 @@ export class Room {
   join(ws, name, look) {
     if (this.phase !== 'lobby') return { err: 'Partida em andamento.' };
     if (this.players.size >= MAX_PLAYERS) return { err: 'Sala cheia.' };
-    const p = { id: this.nextId++, token: crypto.randomBytes(12).toString('hex'), name: sanitizeName(name), look: sanitizeLook(look), ws,
-      x: 0, y: 0, ix: 0, iy: 0, face: 1, moving: false, alive: true, role: null, team: null, job: null, ghostJob: null, tasks: [], ts: {}, killCd: 0, emerg: 0, vent: -1,
-      vote: null, voted: false, chatAt: 0, dcAt: 0, gone: false, cd: {}, act: {}, uses: {}, shieldT: 0, morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
-      killedBy: null, deathRoom: '', target: null, seen: new Set(), revealed: false, sciWait: false, watch: false };
+    const p = this.mk(ws, name, look);
     if (!this.hostId) this.hostId = p.id;
     this.players.set(p.id, p);
     this.send(p, { t: 'hello', id: p.id, token: p.token, code: this.code });
@@ -51,8 +49,29 @@ export class Room {
     if (this.phase === 'lobby') this.lobby(); else this.send(p, { t: 'resume', ...this.startPayload(p), phase: this.phase, timer: Math.ceil(this.timer), meet: this.meet && { ...this.meet, voted: this.list.filter(q => q.voted).map(q => q.id) } });
     return p;
   }
+  mk(ws, name, look) { return { id: this.nextId++, token: crypto.randomBytes(12).toString('hex'), name: sanitizeName(name), look: sanitizeLook(look), ws,
+      x: 0, y: 0, ix: 0, iy: 0, face: 1, moving: false, alive: true, role: null, team: null, job: null, ghostJob: null, tasks: [], ts: {}, killCd: 0, emerg: 0, vent: -1,
+      vote: null, voted: false, chatAt: 0, dcAt: 0, gone: false, cd: {}, act: {}, uses: {}, shieldT: 0, morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
+      killedBy: null, deathRoom: '', target: null, seen: new Set(), revealed: false, sciWait: false, watch: false }; }
+  botCount() { const S = this.settings; return S.bot_on ? Math.max(0, Math.min(S.bot_n, MAX_PLAYERS - this.list.filter(q => q.ws).length)) : 0; }
+  botNameList(nb) {
+    const taken = new Set(this.list.map(q => q.name.toLowerCase())), out = [];
+    const add = raw => { const nm = String(raw || '').replace(/[^\p{L}\p{N} _\-]/gu, '').trim().slice(0, 12); if (!nm || taken.has(nm.toLowerCase())) return; taken.add(nm.toLowerCase()); out.push(nm); };
+    for (const raw of String(this.botText || '').split(/[\n,;]+/)) { if (out.length >= nb) break; add(raw); }
+    for (const nm of shuffle([...GEN_NAMES])) { if (out.length >= nb) break; add(nm); }
+    for (let i = 2; out.length < nb; i++) add('Jogador' + i);
+    return out;
+  }
+  addBots(nb) {
+    if (!nb) return; const names = this.botNameList(nb), used = new Set(this.list.map(q => q.look.c)), free = shuffle([...Array(12).keys()].filter(c => !used.has(c))), anyc = shuffle([...Array(12).keys()]);
+    const opt = n => (Math.random() < 0.45 ? 0 : 1 + rnd(n - 1));
+    for (let i = 0; i < nb; i++) {
+      const look = { c: free.length ? free.shift() : anyc[i % 12], h: opt(7), o: rnd(5), a: opt(5), m: opt(4), s: opt(4) };
+      const p = this.mk(null, names[i], look); p.bot = true; p.ai = new Bot(this, p); this.players.set(p.id, p);
+    }
+  }
   lobby() {
-    this.all({ t: 'lobby', min: MIN_PLAYERS, code: this.code, host: this.hostId, pub: this.pub, settings: this.settings,
+    this.all({ t: 'lobby', bots: this.botCount(), botNames: this.botText, min: MIN_PLAYERS, code: this.code, host: this.hostId, pub: this.pub, settings: this.settings,
       players: this.list.map(p => ({ id: p.id, name: p.name, look: p.look, dc: !p.ws })) });
   }
   leave(p) {
@@ -91,12 +110,14 @@ export class Room {
   }
   start(p) {
     if (p.id !== this.hostId || this.phase !== 'lobby') return;
-    const ps = shuffle(this.list.filter(q => q.ws)); const n = ps.length, S = this.settings;
+    const S = this.settings, humans = this.list.filter(q => q.ws).length, nb = this.botCount(), n = humans + nb;
     if (n < MIN_PLAYERS) return this.send(p, { t: 'err', msg: `São necessários ao menos ${MIN_PLAYERS} jogadores.` });
     let ni = S.impostors || (n <= 6 ? 1 : n <= 10 ? 2 : 3);
     ni = Math.max(1, Math.min(ni, Math.floor((n - 1) / 2)));
     const nn = Math.max(0, Math.min(S.neutrals, n - ni - 2));
-    for (const q of [...this.players.values()]) if (!q.ws) this.players.delete(q.id);
+    for (const q of [...this.players.values()]) if (!q.ws && !q.bot) this.players.delete(q.id);
+    this.addBots(nb);
+    const ps = shuffle(this.list.filter(q => q.ws || q.bot));
     this.assign(ps, ni, nn);
     ps.forEach((q, i) => {
       const a = (i / n) * Math.PI * 2;
@@ -131,6 +152,7 @@ export class Room {
       this.timer -= dt;
       if (this.timer <= 0) this.nextPhase();
     }
+    if (this.n % 3 === 0 && (this.phase === 'play' || this.phase === 'meet' || this.phase === 'vote')) for (const p of this.list) if (p.bot && !p.gone) { try { p.ai.tick(dt * 3); } catch (e) { console.error('[bot]', e); } }
     if (this.n % 30 === 0) this.housekeeping(now);
   }
   cool(p, dt) {
@@ -173,7 +195,7 @@ export class Room {
     const camOn = this.list.some(p => p.watch);
     const r0 = o => { const r = {}; for (const k in o) r[k] = Math.ceil(o[k]); return r; };
     for (const v of this.list) {
-      if (!v.ws) continue;
+      if (!v.ws && !v.bot) continue;
       const vrr = this.visR(v), R = vrr * 1.15, pl = [], bd = [];
       for (const p of this.list) {
         if (p === v || p.gone || p.vent >= 0) continue;
@@ -209,6 +231,7 @@ export class Room {
     switch (m.t) {
       case 'look': if (ph === 'lobby') { p.look = sanitizeLook(m.look); if (m.name) p.name = sanitizeName(m.name); this.lobby(); } break;
       case 'set': this.setSetting(p, m.k, m.v); break;
+      case 'botnames': if (p.id === this.hostId && ph === 'lobby') { this.botText = String(m.text || '').slice(0, 600); this.lobby(); } break;
       case 'start': this.start(p); break;
       case 'input': if (ph === 'play') { p.ix = Math.max(-1, Math.min(1, +m.x || 0)); p.iy = Math.max(-1, Math.min(1, +m.y || 0)); } break;
       case 'taskStart': { if (ph !== 'play') break; const k = p.tasks.find(t => t.id === m.id && !t.done), s = stationById[m.id];
@@ -230,7 +253,7 @@ export class Room {
         if (!ok) break;
         if (m.sup && m.to !== 'skip' && p.supLeft > 0) { p.supLeft--; if (this.supreme == null) this.supreme = m.to; }
         p.voted = true; p.vote = m.to; this.all({ t: 'voted', id: p.id });
-        if (this.alive().every(q => q.voted || !q.ws)) this.finishVote(); } break;
+        if (this.alive().every(q => q.voted || (!q.ws && !q.bot))) this.finishVote(); } break;
       case 'chat': { if (ph !== 'meet' && ph !== 'vote') break; const now = Date.now(); if (now - p.chatAt < 700) break; p.chatAt = now;
         const text = String(m.text || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 140); if (!text) break;
         this.all({ t: 'chat', id: p.id, text, dead: !p.alive }, q => q.alive === p.alive); break; }

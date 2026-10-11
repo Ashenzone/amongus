@@ -2,7 +2,7 @@
 import { drawCrew, setQuality } from './render.js';
 import { COLORS, HATS, OUTFITS, ACCS, MASCOTS, SKINS } from '/shared/cosmetics.js';
 import { sfx, setVol, A } from './audio.js';
-import { JOBS, JOB, PARAMS, TEAMS, SETTING_LIMITS } from '/shared/jobs.js';
+import { JOBS, JOB, PARAMS, BOT_PARAMS, TEAMS, SETTING_LIMITS } from '/shared/jobs.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
@@ -21,7 +21,7 @@ const SET = [['impostors', 'Infiltrados', 0, 3, 1, v => v || 'Auto'], ['speed', 
 let LB = null;
 export function renderLobby(L, myId, send, minPlayers = 4) {
   LB = L; renderJobs(L, myId, send); const host = L.host === myId; $('lCode').textContent = L.code;
-  $('lCount').textContent = `${L.players.length}/15 jogadores · mínimo ${minPlayers}`;
+  const total = L.players.length + (L.bots || 0); $('lCount').textContent = `${L.players.length}/15 jogadores${L.bots ? ` + ${L.bots} bots` : ''} · mínimo ${minPlayers}`;
   const box = $('lSet'); box.innerHTML = '';
   for (const [k, label, min, max, step, fmt] of SET) {
     const w = el('div', 'set'); const b = el('b', null, fmt(L.settings[k])); w.append(el('span', null, label), b);
@@ -29,7 +29,7 @@ export function renderLobby(L, myId, send, minPlayers = 4) {
     r.oninput = () => b.textContent = fmt(+r.value); r.onchange = () => send({ t: 'set', k, v: +r.value }); w.append(r); box.append(w);
   }
   const p = el('label', 'set'); p.append(el('span', null, 'Sala pública (aparece em JOGAR)')); const c = el('input'); c.type = 'checkbox'; c.checked = L.pub; c.disabled = !host; c.onchange = () => send({ t: 'set', k: 'pub', v: c.checked }); p.append(c); box.append(p);
-  $('lStart').disabled = !host || L.players.length < minPlayers; $('lStart').textContent = host ? 'COMEÇAR' : 'AGUARDANDO O DONO';
+  $('lStart').disabled = !host || total < minPlayers; $('lStart').textContent = host ? 'COMEÇAR' : 'AGUARDANDO O DONO';
 }
 export function drawStage() {
   const cv = $('stage'), c = cv.getContext('2d'), w = cv.width, h = cv.height; c.clearRect(0, 0, w, h);
@@ -125,8 +125,17 @@ export function closeMeeting() { clearInterval(M.iv); cancelAnimationFrame(ejRaf
 let jtab = 'inn';
 export function renderJobs(L, myId, send) {
   const host = L.host === myId, tabs = $('jTabs'), body = $('jBody'); tabs.innerHTML = ''; body.innerHTML = '';
-  for (const [k, label] of [['inn', '🔵 Inocentes'], ['neu', '🟣 Neutros'], ['imp', '🔴 Impostores'], ['rules', '⚙ Regras']]) { const b = el('button', 'btn' + (jtab === k ? ' main' : ''), label); b.onclick = () => { jtab = k; renderJobs(L, myId, send); }; tabs.append(b); }
+  for (const [k, label] of [['inn', '🔵 Inocentes'], ['neu', '🟣 Neutros'], ['imp', '🔴 Impostores'], ['rules', '⚙ Regras'], ['bots', '🤖 Bots']]) { const b = el('button', 'btn' + (jtab === k ? ' main' : ''), label); b.onclick = () => { jtab = k; renderJobs(L, myId, send); }; tabs.append(b); }
   const slider = (label, k, min, max, step, fmt) => { const w = el('div', 'set'), b = el('b', null, fmt(L.settings[k])); w.append(el('span', null, label), b); const r = el('input'); r.type = 'range'; r.min = min; r.max = max; r.step = step; r.value = L.settings[k]; r.disabled = !host; r.oninput = () => b.textContent = fmt(+r.value); r.onchange = () => send({ t: 'set', k, v: +r.value }); w.append(r); return w; };
+  if (jtab === 'bots') {
+    const g = el('div', 'jrow'); g.style.gridColumn = '1/3';
+    g.append(el('small', null, 'Bots entram na partida como jogadores normais (mesmas regras, profissões e recargas) e o nome não os identifica. O total de jogadores respeita o limite de 15.'),
+      slider('Bots', 'bot_on', 0, 1, 1, v => (v ? 'Ativado' : 'Desativado')), slider('Quantidade de bots', 'bot_n', 0, 14, 1, v => v),
+      el('small', null, `Bots efetivos nesta sala: ${L.bots || 0} (limitado pelas vagas livres)`));
+    const ta = el('textarea'); ta.rows = 3; ta.placeholder = 'Nomes dos bots, separados por vírgula ou linha (ex.: Ashen, Shadow, Nexus). Vazio = nomes automáticos.'; ta.value = L.botNames || ''; ta.disabled = !host; ta.maxLength = 600; ta.onchange = () => send({ t: 'botnames', text: ta.value }); g.append(ta); body.append(g);
+    let last = ''; for (const p of BOT_PARAMS) { if (p.k === 'bot_on' || p.k === 'bot_n') continue; if (p.grp !== last) { body.append(el('div', 'jgrp', p.grp.toUpperCase())); last = p.grp; } const r = el('div', 'jrow'); r.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); body.append(r); }
+    return;
+  }
   if (jtab === 'rules') {
     const g = el('div', 'jrow'); g.style.gridColumn = '1/3'; g.append(el('small', null, 'Quantidade de neutros e de impostores. Impostores em “Auto” segue 1/2/3 por tamanho da sala.'), slider('Neutros na partida', 'neutrals', 0, 4, 1, v => v), slider('Impostores (0 = Auto)', 'impostors', 0, 3, 1, v => v || 'Auto')); body.append(g);
     let last = ''; for (const p of PARAMS) { if (p.grp !== last) { body.append(el('div', 'jgrp', p.grp.toUpperCase())); last = p.grp; } const r = el('div', 'jrow'); r.append(slider(p.label, p.k, p.min, p.max, p.step, v => v)); body.append(r); }

@@ -54,3 +54,16 @@ export const ABIL = {
 export const INF_MSGS = [['tone', 'Cor de quem me matou'], ['job', 'Profissão de quem me matou'], ['where', 'Onde fui morto']];
 const TONE = ['quente', 'quente', 'quente', 'fria', 'fria', 'fria', 'escura', 'escura', 'quente', 'clara', 'quente', 'escura']; // por índice de COLORS
 export const colorTone = i => TONE[i] || 'neutra';
+
+// Bots: tudo personalizável pelo host
+export const BOT_PARAMS = [
+  P('bot_on', 'Bots', 0, 1, 1, 0, 'Bots'), P('bot_n', 'Quantidade de bots', 0, 14, 1, 3, 'Bots'),
+  P('bot_skill', 'Habilidade geral (%)', 10, 100, 5, 65, 'Comportamento'), P('bot_err', 'Chance de errar (%)', 0, 60, 5, 12, 'Comportamento'),
+  P('bot_react', 'Tempo de reação (s)', 0.3, 4, 0.1, 1.2, 'Comportamento'), P('bot_wait', 'Pausas e hesitação (%)', 0, 100, 5, 40, 'Comportamento'),
+  P('bot_follow', 'Tendência a andar em grupo (%)', 0, 100, 5, 35, 'Comportamento'), P('bot_task', 'Dedicação às tarefas (%)', 0, 100, 5, 75, 'Inocentes'),
+  P('bot_sus', 'Sensibilidade a suspeitas (%)', 10, 100, 5, 55, 'Inocentes'), P('bot_cam', 'Uso das câmeras (%)', 0, 100, 5, 30, 'Inocentes'),
+  P('bot_abil', 'Uso das habilidades (%)', 0, 100, 5, 70, 'Habilidades'), P('bot_aggr', 'Agressividade dos impostores (%)', 0, 100, 5, 50, 'Impostores'),
+  P('bot_sab', 'Frequência de sabotagem (%)', 0, 100, 5, 40, 'Impostores'), P('bot_lie', 'Habilidade de mentir (%)', 0, 100, 5, 60, 'Impostores'),
+  P('bot_talk', 'Quanto falam nas reuniões (%)', 0, 100, 5, 60, 'Reuniões'),
+];
+for (const x of BOT_PARAMS) { DEFAULT_SETTINGS[x.k] = x.def; SETTING_LIMITS[x.k] = [x.min, x.max]; }
