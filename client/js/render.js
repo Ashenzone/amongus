@@ -147,7 +147,7 @@ export function toScreen(x, y) { return [(x - R.cam.x) * zoom + W / 2, (y - R.ca
 
 export function render(S, dt) {
   R.t += dt; if (S.cams) return renderCams(S); const t = R.t, me = S.me;
-  zoom = clamp(H / 760, 0.55, 1.7) * (1 + R.zoomKick * 0.05); R.zoomKick = Math.max(0, R.zoomKick - dt * 3);
+  zoom = clamp(H / (S.touch ? 560 : 760), 0.5, 1.7) * (1 + R.zoomKick * 0.05); R.zoomKick = Math.max(0, R.zoomKick - dt * 3);
   const vpos = S.view || me, k = 1 - Math.exp(-6 * dt); R.cam.x += (vpos.x - R.cam.x) * k; R.cam.y += (vpos.y - R.cam.y) * k;
   const vw = W / zoom / 2, vh = H / zoom / 2;
   R.cam.x = vw * 2 >= WORLD.w ? WORLD.w / 2 : clamp(R.cam.x, vw, WORLD.w - vw); R.cam.y = vh * 2 >= WORLD.h ? WORLD.h / 2 : clamp(R.cam.y, vh, WORLD.h - vh);

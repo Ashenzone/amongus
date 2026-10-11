@@ -1,4 +1,4 @@
-# Quórum — Estação Halcyon
+# Quórum — Estação Halcyon (v0.5 Beta)
 
 Jogo 2D multiplayer de dedução social (4–15 jogadores). Servidor autoritativo em Node.js + WebSocket; cliente em Canvas 2D (sem build, sem assets externos: arte vetorial e áudio sintetizados).
 
@@ -31,12 +31,19 @@ O host configura no lobby (botão PROFISSÕES): chance e máximo de cada profiss
 ## Mentalista
 Tem dois painéis: **PAINEL** (igual ao do Cientista: vivo/morto, usos por reunião) e **PROFISSÕES** (desbloqueia ao completar todas as tarefas; mostra nome, profissão e vivo/morto de todos; só abre durante as reuniões). A sondagem individual continua revelando a profissão de quem ficar parado.
 
+## Celular
+Joystick flutuante (metade esquerda da tela), botões grandes à direita (USAR, REPORTAR, ELIMINAR, DUTO/PRÓXIMO, SABOTAR e habilidades), HUD compacto (toque na barra de tarefas para ver a lista; toque no minimapa para o mapa grande), botão de tela cheia e aviso para girar o aparelho. Reunião, lobby, menus e minigames são responsivos. Use o celular na horizontal.
+
+## Animação de morte
+Quem morre por ataque (e quem matou) vê a cena em tela cheia: o assassino avança, o golpe estilizado (sem gore) e a vítima cai. No lobby, clique no seu personagem para personalizar; o dono também edita os personagens de bots.
+
 ## Bots inteligentes
 No lobby: PROFISSÕES → aba **🤖 Bots** (ativar, quantidade, nomes e 14 parâmetros de comportamento). `server/bot.js` (cérebro) e `server/nav.js` (navegação A*).
-- Bots entram na partida como jogadores normais, com os nomes definidos pelo admin (sem duplicar; vazio = nomes automáticos) e nada os identifica como bots.
+- Bots aparecem no lobby como jogadores normais (quem não é o dono nem vê a configuração de bots), com os nomes definidos pelo admin (sem duplicar; vazio = nomes automáticos) e nada os identifica como bots.
 - Recebem as mesmas mensagens de um cliente (visão limitada, avisos, chat) e agem pelas mesmas mensagens (mover, kill, votar, habilidades), então regras, profissões e recargas são idênticas às dos humanos. Não leem o estado dos outros jogadores no servidor.
 - Objetivos por prioridade: reportar corpo, consertar sabotagem, fugir, caçar/seguir, tarefas (reais ou fingidas), explorar, câmeras. Memória de suspeitas (quem estava perto do corpo, sumiu perto de duto, mudou de aparência, última companhia da vítima, pistas das habilidades, acusações no chat) usada no chat e no voto.
 - **Os bots conversam:** durante as reuniões entendem o que os jogadores escrevem (cumprimentos, "onde você estava?", "alguém viu algo?", "votem no X", acusações, "qual sua profissão?", "você é um bot?") e respondem com atraso natural, com limite por reunião e no estilo da profissão (impostores mentem). Mencionar o nome de um bot garante resposta.
+- **Reivindicações:** bots declaram função ("terminei as tasks, sou Mentalista…"), os outros decidem se confiam (função repetida = mentira; sala errada = mentira; quem insiste no mesmo alvo pode ser Execution; quem pede para ser votado pode ser Joker). O ritmo das mensagens é configurável.
 - Parâmetros: habilidade, erro, reação, hesitação, grupo, tarefas, suspeita, câmeras, habilidades, agressividade, sabotagem, mentira, conversa.
 
 ## Câmeras e setas

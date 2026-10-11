@@ -1,6 +1,6 @@
 // Orquestra tudo: perfil, rede, estado do jogo, entrada, HUD e loop principal.
 import { net } from './net.js';
-import { initRender, render, R, fx, addShake, setQuality } from './render.js';
+import { initRender, render, R, fx, addShake, setQuality, drawCrew } from './render.js';
 import { initAudio, A, sfx, alarm } from './audio.js';
 import { openTask, TASK_MIN } from './tasks.js';
 import * as UI from './ui.js';
@@ -16,7 +16,7 @@ Object.assign(A.vol, P.vol); setQuality(P.q);
 
 const S = { phase: 'menu', id: null, roster: new Map(), role: null, mates: new Set(), me: { x: SPECIAL.spawn.x, y: SPECIAL.spawn.y, alive: false, vent: -1, moving: false, face: 1 },
   players: new Map(), bodies: [], myTasks: [], sab: null, vr: 900, look: P.look, name: P.name, acting: 0, cd: [0, 0], intro: 0, tk: [0, 1], settings: { speed: 1, emergencies: 1 },
-  emergUsed: 0, hideMe: true, lobby: null, onDoor: () => sfx('door'), job: null, team: null, ghostJob: null, target: null, known: new Map(), ab: { cd: {}, act: {}, us: {}, sup: 0 }, arrows: [], loc: null, probe: null, meInv: false, meShield: 0, sup: 0, supMode: false, _ej: null, cams: null, camsOn: false, view: null, introEnd: 0, bg: { x: SPECIAL.spawn.x, y: SPECIAL.spawn.y }, jobPanel: false };
+  emergUsed: 0, hideMe: true, lobby: null, onDoor: () => sfx('door'), job: null, team: null, ghostJob: null, target: null, known: new Map(), ab: { cd: {}, act: {}, us: {}, sup: 0 }, arrows: [], loc: null, probe: null, meInv: false, meShield: 0, sup: 0, supMode: false, _ej: null, cams: null, camsOn: false, view: null, introEnd: 0, bg: { x: SPECIAL.spawn.x, y: SPECIAL.spawn.y }, jobPanel: false, joy: { x: 0, y: 0 }, touch: false };
 const send = o => net.send(o);
 initRender($('game'));
 
@@ -38,7 +38,14 @@ $('mPlay').onclick = () => enter('quick'); $('mCreate').onclick = () => enter('c
 $('jGo').onclick = () => { const code = $('codeIn').value.trim().toUpperCase(); code.length === 4 ? enter('join', { code }) : UI.toast('Digite o código de 4 letras.'); };
 $('codeIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('jGo').click(); });
 $('codeIn').addEventListener('input', e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); });
-$('mCustom').onclick = $('lCustom').onclick = () => { initAudio(); UI.initCustom(P.look, look => { P.look = look; save(); inLobby() && send({ t: 'look', look, name: P.name }); sfx('ok'); back(); }); go('custom'); };
+const openCustom = (look, onSave) => { initAudio(); UI.initCustom(look, onSave); go('custom'); };
+const saveMine = look => { P.look = look; save(); inLobby() && send({ t: 'look', look, name: P.name }); sfx('ok'); back(); };
+$('mCustom').onclick = $('lCustom').onclick = () => openCustom(P.look, saveMine);
+$('stage').addEventListener('click', e => { // clicar no personagem abre a personalização (no seu; o dono também edita os dos bots)
+  const cv = $('stage'), r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * cv.width / r.width, y = (e.clientY - r.top) * cv.height / r.height, h = UI.STAGE.hits.find(q => x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1);
+  if (!h || !S.lobby) return; if (h.id === S.id) return openCustom(P.look, saveMine);
+  if (S.lobby.host === S.id) { const pl = S.lobby.players.find(q => q.id === h.id); if (pl) openCustom(pl.look, look => { send({ t: 'botlook', id: h.id, look }); back(); }); }
+});
 $('mSettings').onclick = () => { initAudio(); UI.initSettings(P, save); go('settings'); };
 document.querySelectorAll('[data-back]').forEach(b => b.onclick = back);
 $('lJobs').onclick = () => go('jobs');
@@ -71,14 +78,19 @@ function begin(m, resume) {
 }
 net.on('start', m => begin(m, false));
 net.on('resume', m => { begin(m, true); if (m.phase !== 'play') { $('hud').classList.add('hide'); S.phase = m.phase; UI.toast('Reconectado. Aguarde a próxima fase.'); } else UI.toast('Reconectado!'); });
+function alliesNode(list) {
+  if (!list.length) return null; const box = document.createElement('div'), h = document.createElement('div'), row = document.createElement('div'); box.className = 'allies'; h.className = 'ah'; h.textContent = list.length > 1 ? 'SEUS PARCEIROS' : 'SEU PARCEIRO'; row.className = 'ar'; box.append(h, row);
+  for (const [id, job] of list) { const r = S.roster.get(id); if (!r) continue; const w = document.createElement('div'), cv = document.createElement('canvas'), n = document.createElement('b'), j = document.createElement('small'); cv.width = 140; cv.height = 170; drawCrew(cv.getContext('2d'), r.look, 70, 148, { s: 1.7 }); n.textContent = r.name; j.textContent = JOB[job].name; w.append(cv, n, j); row.append(w); }
+  return box;
+}
 function intro() {
   const e = $('intro'), T = TEAMS[S.team], J = JOB[S.job], col = J.color === '#111419' ? '#e9f1ff' : J.color; e.innerHTML = ''; e.classList.add('on');
-  const scene = (big, color, small, bar) => { e.innerHTML = ''; const h = document.createElement('div'); h.textContent = big; h.style.color = color; h.style.textShadow = `0 0 40px ${color}`; e.append(h); if (bar) { const l = document.createElement('div'); l.className = 'ldbar'; l.append(document.createElement('i')); e.append(l); } if (small) { const s = document.createElement('small'); s.textContent = small; e.append(s); } };
+  const scene = (big, color, small, bar, node) => { e.innerHTML = ''; const h = document.createElement('div'); h.textContent = big; h.style.color = color; h.style.textShadow = `0 0 40px ${color}`; e.append(h); if (bar) { const l = document.createElement('div'); l.className = 'ldbar'; l.append(document.createElement('i')); e.append(l); } if (small) { const s = document.createElement('small'); s.textContent = small; e.append(s); }  if (node) e.append(node); };
   scene('CARREGANDO', '#e9f1ff', 'Preparando a Estação Halcyon…', true);
   setTimeout(() => { scene(`${T.icon} ${T.name.toUpperCase()}`, T.color, ''); sfx(S.team === 'imp' ? 'sabotage' : 'click'); }, 1100);
   setTimeout(() => {
-    let extra = J.desc; if (S.team === 'imp') { const al = [...S.known].filter(([i]) => i !== S.id).map(([i, j]) => `${S.roster.get(i)?.name} (${JOB[j].name})`); if (al.length) extra += ` Aliados: ${al.join(', ')}.`; }
-    if (S.job === 'execution') extra += ` Seu alvo: ${S.roster.get(S.target)?.name || '?'}.`; scene(J.name.toUpperCase(), col, extra); sfx('ok');
+    let extra = J.desc;
+    if (S.job === 'execution') extra += ` Seu alvo: ${S.roster.get(S.target)?.name || '?'}.`; scene(J.name.toUpperCase(), col, extra, false, S.team === 'imp' ? alliesNode([...S.known].filter(([i]) => i !== S.id)) : null); sfx('ok');
   }, 2300);
   setTimeout(() => { e.classList.remove('on'); if (S.phase === 'play') $('hud').classList.remove('hide'); }, 4100);
 }
@@ -106,7 +118,7 @@ net.on('sabPart', () => sfx('fixed'));
 net.on('sabEnd', () => { sfx('fixed'); UI.toast('Sistema restaurado.'); });
 net.on('meeting', m => {
   S.phase = 'meet'; closeTaskUi(); alarm(false); S.sab = null; S.bodies = []; $('hud').classList.add('hide'); $('intro').classList.remove('on'); sfx(m.reason === 'body' ? 'report' : 'meeting'); addShake(6);
-  UI.openMeeting(m, { roster: S.roster, alive: S.me.alive }); S.arrows = []; S.loc = null; S.supMode = false; S.cams = null; $('camUI').classList.add('hide'); $('hud').classList.remove('incam'); $('mSup').hidden = true; $('bigmap').classList.add('hide'); buildMeetAb();
+  UI.openMeeting(m, { roster: S.roster, alive: S.me.alive, mates: S.team === 'imp' ? S.mates : null, me: S.id }); S.arrows = []; S.loc = null; S.supMode = false; S.cams = null; $('camUI').classList.add('hide'); $('hud').classList.remove('incam'); $('mSup').hidden = true; $('bigmap').classList.add('hide'); buildMeetAb();
 });
 net.on('phase', m => { S.phase = 'vote'; UI.startVote(m.time); sfx('vote'); $('mSup').hidden = !(S.sup > 0 && S.me.alive); $('mSup').classList.remove('main'); });
 net.on('voted', m => { UI.markVoted(m.id); sfx('click'); });
@@ -183,7 +195,7 @@ function hud(dt) {
     const tg = killTarget() != null, k = $('bKill'); k.disabled = !me.alive || S.cd[0] > 0 || !tg; k.classList.toggle('rdy', !k.disabled); k.querySelector('small').textContent = S.cd[0] ? `${S.cd[0]}s` : 'Q';
     const sbn = $('bSab'); sbn.disabled = !me.alive || !!sab || S.cd[1] > 0; sbn.querySelector('small').textContent = S.cd[1] ? `${S.cd[1]}s` : 'F';
   }
-  updAbil(me); if (!$('bigmap').classList.contains('hide')) drawBig();
+  $('bNext').classList.toggle('hide', !(me.vent >= 0)); updAbil(me); if (!$('bigmap').classList.contains('hide')) drawBig();
   mc.drawImage(miniBase, 0, 0);
   if (sab?.k !== 'comms') { mc.fillStyle = '#ffe066'; for (const t of S.myTasks) if (!t.done) { const s = STATIONS.find(q => q.id === t.id); mc.fillRect(s.x * ms - 2, s.y * ms - 2, 4, 4); } mc.fillStyle = '#fff'; mc.beginPath(); mc.arc(me.x * ms, me.y * ms, 3.5, 0, 6.3); mc.fill(); if (S.loc) { mc.fillStyle = '#ffd23d'; mc.beginPath(); mc.arc(S.loc[0] * ms, S.loc[1] * ms, 4.5, 0, 6.3); mc.fill(); } }
 }
@@ -199,6 +211,7 @@ function update(dt) {
     A.tension += (0 - A.tension) * dt; return;
   }
   let ix = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0), iy = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
+  if (S.joy.x || S.joy.y) { ix = S.joy.x; iy = S.joy.y; }
   if (closeTask || S.intro > 0 || me.vent >= 0 || S.cams || performance.now() < S.introEnd) ix = iy = 0;
   const key = ix + ',' + iy; inT -= dt; if (key !== lastIn || inT <= 0) { send({ t: 'input', x: ix, y: iy }); lastIn = key; inT = 0.1; }
   const l = Math.hypot(ix, iy); me.moving = l > 0;
@@ -213,7 +226,7 @@ function update(dt) {
   A.tension += ((S.sab ? 0.85 : S.bodies.length ? 0.6 : 0.15) - A.tension) * Math.min(1, dt * 0.8);
   hud(dt);
 }
-function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; update(dt); render(S, dt); requestAnimationFrame(frame); }
+function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; update(dt); touchUi(); render(S, dt); requestAnimationFrame(frame); }
 // ---------- profissões: habilidades, painel e mapa grande ----------
 const effJob = () => (S.me.alive ? S.job : S.ghostJob);
 const nearP = r => { let b = null, bd = r; for (const p of S.players.values()) if (!p.ghost && dist(S.me, p) < bd) { b = p; bd = dist(S.me, p); } return b; };
@@ -228,7 +241,7 @@ function buildMeetAb() {
 }
 function updAbil(me) {
   const ab = S.ab, v = $('bVent'), cv = canVent() && me.alive; v.classList.toggle('hide', !cv);
-  if (cv) { const vc = ab.cd.vent | 0; v.disabled = vc > 0 || (me.vent < 0 && !ventNear()); v.firstChild.textContent = me.vent >= 0 ? 'SAIR' : 'VENTILAÇÃO'; v.querySelector('small').textContent = vc ? vc + 's' : 'V'; }
+  if (cv) { const vc = ab.cd.vent | 0; v.disabled = vc > 0 || (me.vent < 0 && !ventNear()); v.firstChild.textContent = me.vent >= 0 ? 'SAIR' : 'DUTO'; v.querySelector('small').textContent = vc ? vc + 's' : 'V'; }
   if (S._ej !== effJob()) { S._ej = effJob(); buildAbil(); }
   for (const b of $('abil').children) {
     const id = b.dataset.id, cd = ab.cd[id] | 0, act = ab.act[id] | 0, tg = nearP(95); let dis = cd > 0, txt = cd ? cd + 's' : b.dataset.k;
@@ -284,6 +297,28 @@ function buildArrows(m, vent) {
 function camKey(code) { if (['KeyE', 'Escape', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) send({ t: 'ab', a: 'camOff' }); }
 $('cExit').onclick = () => send({ t: 'ab', a: 'camOff' });
 net.on('camOff', () => { S.cams = null; $('camUI').classList.add('hide'); $('hud').classList.remove('incam'); UI.toast('Câmeras fora do ar.'); });
+// ---------- animação de morte e controles de toque (celular) ----------
+net.on('kanim', m => { const k = m.k != null ? S.roster.get(m.k)?.look : null, v = S.roster.get(m.v)?.look; if (v) UI.killScene(k || null, v, m.r); });
+S.touch = matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && innerWidth < 1100); document.body.classList.toggle('touch', S.touch);
+addEventListener('touchstart', () => { S.touch = true; document.body.classList.add('touch'); }, { once: true, passive: true });
+const zone = $('joyZone'), jbase = $('joyBase'), jknob = $('joyKnob'); let jp = null, jo = { x: 0, y: 0 };
+function moveJoy(e) {
+  let dx = e.clientX - jo.x, dy = e.clientY - jo.y; const R = 56, l = Math.hypot(dx, dy) || 1; if (l > R) { dx = dx / l * R; dy = dy / l * R; }
+  jknob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`; const m = Math.hypot(dx, dy) / R; S.joy = m < 0.22 ? { x: 0, y: 0 } : { x: dx / Math.hypot(dx, dy), y: dy / Math.hypot(dx, dy) };
+}
+function endJoy(e) { if (e.pointerId !== jp) return; jp = null; S.joy = { x: 0, y: 0 }; jbase.style.display = 'none'; jknob.style.transform = 'translate(-50%,-50%)'; }
+zone.addEventListener('pointerdown', e => { if (jp !== null) return; jp = e.pointerId; try { zone.setPointerCapture(jp); } catch { } jo = { x: e.clientX, y: e.clientY }; jbase.style.display = 'block'; jbase.style.left = jo.x + 'px'; jbase.style.top = jo.y + 'px'; moveJoy(e); });
+zone.addEventListener('pointermove', e => { if (e.pointerId === jp) moveJoy(e); });
+zone.addEventListener('pointerup', endJoy); zone.addEventListener('pointercancel', endJoy);
+let lastJoyShow = null, lastIngame = null;
+function touchUi() {
+  const show = S.touch && S.phase === 'play' && !closeTask && !S.cams && performance.now() >= S.introEnd;
+  if (show !== lastJoyShow) { lastJoyShow = show; zone.classList.toggle('hide', !show); if (!show && jp !== null) endJoy({ pointerId: jp }); }
+  const ing = S.phase === 'play'; if (ing !== lastIngame) { lastIngame = ing; document.body.classList.toggle('ingame', ing); }
+}
+$('bFull').onclick = () => { const d = document.documentElement; (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d); screen.orientation?.lock?.('landscape').catch(() => { }); };
+$('bNext').onclick = () => send({ t: 'vent', a: 'next' });
+$('mapbox').onclick = () => toggleMap(); $('hTasks').onclick = () => $('hTasks').classList.toggle('open');
 net.on('hint', m => UI.toast(m.text, 7000));
 net.on('unlock', () => { S.jobPanel = true; UI.toast('Painel de profissões desbloqueado! Abra-o durante as reuniões.', 6000); sfx('ok'); });
 net.on('jobpanel', m => UI.pick('Painel de profissões', m.list.map(([id, job, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: `${JOB[job].name} · ${al ? 'VIVO' : 'MORTO'}` })), null));

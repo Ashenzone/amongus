@@ -64,6 +64,6 @@ export const BOT_PARAMS = [
   P('bot_sus', 'Sensibilidade a suspeitas (%)', 10, 100, 5, 55, 'Inocentes'), P('bot_cam', 'Uso das câmeras (%)', 0, 100, 5, 30, 'Inocentes'),
   P('bot_abil', 'Uso das habilidades (%)', 0, 100, 5, 70, 'Habilidades'), P('bot_aggr', 'Agressividade dos impostores (%)', 0, 100, 5, 50, 'Impostores'),
   P('bot_sab', 'Frequência de sabotagem (%)', 0, 100, 5, 40, 'Impostores'), P('bot_lie', 'Habilidade de mentir (%)', 0, 100, 5, 60, 'Impostores'),
-  P('bot_talk', 'Quanto falam nas reuniões (%)', 0, 100, 5, 60, 'Reuniões'),
+  P('bot_talk', 'Quanto falam nas reuniões (%)', 0, 100, 5, 60, 'Reuniões'), P('bot_gap_all', 'Intervalo entre mensagens de bots (s)', 0.5, 15, 0.5, 3.5, 'Velocidade do chat'), P('bot_gap_own', 'Intervalo mínimo entre mensagens do mesmo bot (s)', 1, 30, 1, 6, 'Velocidade do chat'),
 ];
 for (const x of BOT_PARAMS) { DEFAULT_SETTINGS[x.k] = x.def; SETTING_LIMITS[x.k] = [x.min, x.max]; }

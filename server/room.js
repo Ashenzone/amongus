@@ -33,12 +33,12 @@ export class Room {
   // ---------- lobby ----------
   join(ws, name, look) {
     if (this.phase !== 'lobby') return { err: 'Partida em andamento.' };
-    if (this.players.size >= MAX_PLAYERS) return { err: 'Sala cheia.' };
+    if (this.humansList().length >= MAX_PLAYERS) return { err: 'Sala cheia.' };
     const p = this.mk(ws, name, look);
     if (!this.hostId) this.hostId = p.id;
     this.players.set(p.id, p);
     this.send(p, { t: 'hello', id: p.id, token: p.token, code: this.code });
-    this.lobby();
+    this.syncBots(); this.lobby();
     return { p };
   }
   rejoin(ws, tok) {
@@ -53,7 +53,7 @@ export class Room {
       x: 0, y: 0, ix: 0, iy: 0, face: 1, moving: false, alive: true, role: null, team: null, job: null, ghostJob: null, tasks: [], ts: {}, killCd: 0, emerg: 0, vent: -1,
       vote: null, voted: false, chatAt: 0, dcAt: 0, gone: false, cd: {}, act: {}, uses: {}, shieldT: 0, morph: null, track: null, probe: null, supLeft: 0, supGiven: false,
       killedBy: null, deathRoom: '', target: null, seen: new Set(), revealed: false, sciWait: false, watch: false }; }
-  botCount() { const S = this.settings; return S.bot_on ? Math.max(0, Math.min(S.bot_n, MAX_PLAYERS - this.list.filter(q => q.ws).length)) : 0; }
+  botCount() { const S = this.settings; return S.bot_on ? Math.max(0, Math.min(S.bot_n, MAX_PLAYERS - this.humansList().length)) : 0; }
   botNameList(nb) {
     const taken = new Set(this.list.map(q => q.name.toLowerCase())), out = [];
     const add = raw => { const nm = String(raw || '').replace(/[^\p{L}\p{N} _\-]/gu, '').trim().slice(0, 12); if (!nm || taken.has(nm.toLowerCase())) return; taken.add(nm.toLowerCase()); out.push(nm); };
@@ -70,15 +70,28 @@ export class Room {
       const p = this.mk(null, names[i], look); p.bot = true; p.ai = new Bot(this, p); this.players.set(p.id, p);
     }
   }
+  humansList() { return this.list.filter(p => !p.bot); }
+  pubSettings() { const s = { ...this.settings }; for (const k of Object.keys(s)) if (k.startsWith('bot_')) delete s[k]; return s; } // quem não é o dono não vê a config dos bots
+  syncBots(rebuild = false) {
+    if (this.phase !== 'lobby') return;
+    if (rebuild) for (const b of this.list.filter(p => p.bot)) this.players.delete(b.id);
+    const hn = new Set(this.humansList().map(p => p.name.toLowerCase()));
+    for (const b of this.list.filter(p => p.bot)) if (hn.has(b.name.toLowerCase())) this.players.delete(b.id);
+    const want = this.botCount(), cur = this.list.filter(p => p.bot);
+    while (cur.length > want) this.players.delete(cur.pop().id);
+    if (cur.length < want) this.addBots(want - cur.length);
+  }
+  botCanSpeak() { return Date.now() - (this.lastBotChat || 0) >= this.settings.bot_gap_all * 1000; }
+  botSpoke() { this.lastBotChat = Date.now(); }
   lobby() {
-    this.all({ t: 'lobby', bots: this.botCount(), botNames: this.botText, min: MIN_PLAYERS, code: this.code, host: this.hostId, pub: this.pub, settings: this.settings,
-      players: this.list.map(p => ({ id: p.id, name: p.name, look: p.look, dc: !p.ws })) });
+    const players = this.list.map(p => ({ id: p.id, name: p.name, look: p.look, dc: !p.ws })), base = { t: 'lobby', min: MIN_PLAYERS, code: this.code, host: this.hostId, pub: this.pub, players };
+    for (const p of this.list) if (p.ws) this.send(p, p.id === this.hostId ? { ...base, settings: this.settings, bots: this.list.filter(q => q.bot).length, botNames: this.botText } : { ...base, settings: this.pubSettings() });
   }
   leave(p) {
     if (this.phase === 'lobby') {
       this.players.delete(p.id);
-      if (this.hostId === p.id) this.hostId = this.list[0]?.id ?? null;
-      this.list.length ? this.lobby() : this.destroy();
+      if (this.hostId === p.id) this.hostId = this.humansList()[0]?.id ?? null;
+      if (this.humansList().length) { this.syncBots(); this.lobby(); } else this.destroy();
     } else { p.ws = null; p.dcAt = Date.now(); }
   }
   disconnect(p) { if (this.phase === 'lobby') this.leave(p); else { p.ws = null; p.dcAt = Date.now(); } }
@@ -88,6 +101,7 @@ export class Room {
     if (p.id !== this.hostId || this.phase !== 'lobby') return;
     if (k === 'pub') this.pub = !!v;
     else if (LIMITS[k]) { v = +v; if (!Number.isFinite(v)) return; this.settings[k] = Math.min(LIMITS[k][1], Math.max(LIMITS[k][0], v)); }
+    if (k === 'bot_on' || k === 'bot_n') this.syncBots();
     this.lobby();
   }
 
@@ -110,13 +124,12 @@ export class Room {
   }
   start(p) {
     if (p.id !== this.hostId || this.phase !== 'lobby') return;
-    const S = this.settings, humans = this.list.filter(q => q.ws).length, nb = this.botCount(), n = humans + nb;
+    const S = this.settings; this.syncBots(); const n = this.list.filter(q => q.ws || q.bot).length;
     if (n < MIN_PLAYERS) return this.send(p, { t: 'err', msg: `São necessários ao menos ${MIN_PLAYERS} jogadores.` });
     let ni = S.impostors || (n <= 6 ? 1 : n <= 10 ? 2 : 3);
     ni = Math.max(1, Math.min(ni, Math.floor((n - 1) / 2)));
     const nn = Math.max(0, Math.min(S.neutrals, n - ni - 2));
     for (const q of [...this.players.values()]) if (!q.ws && !q.bot) this.players.delete(q.id);
-    this.addBots(nb);
     const ps = shuffle(this.list.filter(q => q.ws || q.bot));
     this.assign(ps, ni, nn);
     ps.forEach((q, i) => {
@@ -133,7 +146,7 @@ export class Room {
   startPayload(p) {
     return { role: p.role, team: p.team, job: p.job, ghostJob: p.ghostJob, jp: p.revealed, target: p.target, sup: p.supLeft, x: p.x, y: p.y, alive: p.alive,
       mates: p.team === 'imp' ? this.list.filter(q => q.team === 'imp').map(q => [q.id, q.job]) : [],
-      tasks: p.tasks, settings: this.settings, players: this.list.map(q => ({ id: q.id, name: q.name, look: q.look })), emergUsed: p.emerg };
+      tasks: p.tasks, settings: this.pubSettings(), players: this.list.map(q => ({ id: q.id, name: q.name, look: q.look })), emergUsed: p.emerg };
   }
 
   // ---------- loop ----------
@@ -229,9 +242,10 @@ export class Room {
   handle(p, m) {
     const ph = this.phase, live = p.alive && !p.gone;
     switch (m.t) {
-      case 'look': if (ph === 'lobby') { p.look = sanitizeLook(m.look); if (m.name) p.name = sanitizeName(m.name); this.lobby(); } break;
+      case 'look': if (ph === 'lobby') { p.look = sanitizeLook(m.look); if (m.name) p.name = sanitizeName(m.name); this.syncBots(); this.lobby(); } break;
+      case 'botlook': { if (p.id !== this.hostId || ph !== 'lobby') break; const b = this.players.get(+m.id); if (b && b.bot) { b.look = sanitizeLook(m.look); this.lobby(); } else this.send(p, { t: 'err', msg: 'Só dá para personalizar o seu personagem ou os de bots.' }); break; }
       case 'set': this.setSetting(p, m.k, m.v); break;
-      case 'botnames': if (p.id === this.hostId && ph === 'lobby') { this.botText = String(m.text || '').slice(0, 600); this.lobby(); } break;
+      case 'botnames': if (p.id === this.hostId && ph === 'lobby') { this.botText = String(m.text || '').slice(0, 600); this.syncBots(true); this.lobby(); } break;
       case 'start': this.start(p); break;
       case 'input': if (ph === 'play') { p.ix = Math.max(-1, Math.min(1, +m.x || 0)); p.iy = Math.max(-1, Math.min(1, +m.y || 0)); } break;
       case 'taskStart': { if (ph !== 'play') break; const k = p.tasks.find(t => t.id === m.id && !t.done), s = stationById[m.id];
@@ -266,6 +280,7 @@ export class Room {
   // Morte unificada (kill, tiro, voto). force ignora escudo.
   slay(v, killer, { body = true, force = false } = {}) {
     if (!v.alive || (!force && v.shieldT > 0)) return false;
+    const vap = v.morph || v.id, kap = killer ? (killer.morph || killer.id) : null;
     v.alive = false; v.ix = v.iy = 0; v.moving = false; v.watch = false; v.vent = -1; v.track = null; v.probe = null; v.act = {}; v.morph = null;
     v.killedBy = killer?.id ?? null; v.deathRoom = roomAt(v.x, v.y)?.name || 'corredor';
     const vib = killer?.job === 'vibora';
@@ -273,6 +288,7 @@ export class Room {
       this.bodies.push({ id: v.id, x: v.x, y: v.y, killer: killer?.id ?? null, arrow: v.job === 'barulhento', g: vib, vanish: vib ? this.settings.vib_van : 0 });
       this.all({ t: 'fx', k: vib ? 'killg' : 'kill', id: v.id, x: v.x | 0, y: v.y | 0 }, q => !q.alive || dist(q, v) <= this.visR(q) * 1.3);
     }
+    if (body) { this.send(v, { t: 'kanim', k: kap, v: vap, r: 'victim' }); if (killer) this.send(killer, { t: 'kanim', k: kap, v: vap, r: 'killer' }); }
     this.send(v, { t: 'died', by: killer ? 'kill' : 'vote' });
     // alvo do Execution morreu por outros meios
     for (const q of this.list) if (q.job === 'execution' && q.target === v.id && q.alive && killer) { q.target = null; this.send(q, { t: 'err', msg: 'Seu alvo morreu. Você agora joga pela sobrevivência.' }); }
@@ -450,8 +466,8 @@ export class Room {
   toLobby() {
     clearInterval(this.loop); this.loop = null;
     for (const p of [...this.players.values()]) { if (!p.ws || p.gone) this.players.delete(p.id); else Object.assign(p, { role: null, team: null, job: null, ghostJob: null, alive: true, tasks: [], vent: -1, act: {}, cd: {}, morph: null }); }
-    if (!this.players.has(this.hostId)) this.hostId = this.list[0]?.id ?? null;
+    if (!this.players.has(this.hostId)) this.hostId = this.humansList()[0]?.id ?? null;
     Object.assign(this, { phase: 'lobby', bodies: [], sab: null, meet: null });
-    this.list.length ? this.lobby() : this.destroy();
+    if (this.humansList().length) { this.syncBots(); this.lobby(); } else this.destroy();
   }
 }

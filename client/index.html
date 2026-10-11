@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Quórum — Estação Halcyon</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&display=swap" rel="stylesheet">
@@ -19,11 +19,13 @@
   <div id="acts">
     <div id="abil"></div>
     <button id="bSab" class="imp hide">SABOTAR<small>F</small></button>
-    <button id="bVent" class="imp hide">VENTILAÇÃO<small>V</small></button>
+    <button id="bVent" class="imp hide">DUTO<small>V</small></button>
+    <button id="bNext" class="imp hide">PRÓXIMO<small>C</small></button>
     <button id="bKill" class="imp hide">ELIMINAR<small>Q</small></button>
     <button id="bRep">REPORTAR<small>R</small></button>
     <button id="bUse" class="main">USAR<small>E</small></button>
   </div>
+  <button id="bFull" aria-label="Tela cheia">⛶</button>
   <div id="sabMenu" class="hide"><button data-s="lights">Apagão</button><button data-s="comms">Comunicação</button><button data-s="heat">Superaquecimento</button></div>
 </div>
 
@@ -42,7 +44,7 @@
 <section id="join" class="screen"><div class="panel narrow"><h2>Entrar em sala</h2><input id="codeIn" maxlength="4" placeholder="CÓDIGO" autocomplete="off" autocapitalize="characters" spellcheck="false"><div class="row"><button class="btn" data-back>VOLTAR</button><button class="btn main" id="jGo">ENTRAR</button></div></div></section>
 
 <section id="lobby" class="screen">
-  <div class="lobbyL"><div class="codebox">Código da sala <b id="lCode">----</b></div><canvas id="stage" width="900" height="420"></canvas><div id="lCount"></div></div>
+  <div class="lobbyL"><div class="codebox">Código da sala <b id="lCode">----</b></div><canvas id="stage" width="900" height="420"></canvas><div id="lCount"></div><small id="lHint">Clique no seu personagem para trocar a roupa e a aparência</small></div>
   <div class="panel lobbyR"><h2>Partida</h2><div id="lSet"></div>
     <div class="row"><button class="btn" id="lCustom">APARÊNCIA</button><button class="btn" id="lJobs">PROFISSÕES</button><button class="btn" id="lLeave">SAIR</button></div>
     <button class="btn main" id="lStart">COMEÇAR</button></div>
@@ -66,6 +68,9 @@
 <div id="camUI" class="hide"><span>● CÂMERAS DE SEGURANÇA</span><button id="cExit">SAIR (E)</button></div>
 <div id="pick"><div class="card"><div class="ttl"><b id="pkT"></b><button class="x" id="pkX" aria-label="Fechar">✕</button></div><div id="pkL"></div></div></div>
 <canvas id="bigmap" width="880" height="510" class="hide"></canvas>
+<div id="joyZone" class="hide"><div id="joyBase"><i id="joyKnob"></i></div></div>
+<div id="rot">📱 Gire o celular para jogar na horizontal</div>
+<div id="ver">v0.5 (Beta)</div>
 <div id="intro"></div><div id="task"></div><div id="toast"></div>
 <script type="module" src="js/main.js"></script>
 </body>

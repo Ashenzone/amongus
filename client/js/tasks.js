@@ -8,7 +8,7 @@ const shake = el => { el.classList.remove('shake'); void el.offsetWidth; el.clas
 const GAMES = {
   wires(b, win) {
     const cols = ['#ff4f6d', '#ffd93d', '#4aa8ff', '#6bd968'], Lc = shuffle([0, 1, 2, 3]), Rc = shuffle([0, 1, 2, 3]);
-    b.innerHTML = '<p class="hint">Ligue os fios da mesma cor.</p><svg width="360" height="250"></svg>'; const svg = b.querySelector('svg'); let sel = -1, done = 0; const used = new Set();
+    b.innerHTML = '<p class="hint">Ligue os fios da mesma cor.</p><svg width="360" height="250" viewBox="0 0 360 250"></svg>'; const svg = b.querySelector('svg'); let sel = -1, done = 0; const used = new Set();
     const left = [];
     for (let i = 0; i < 4; i++) {
       svg.append(SVG('rect', { x: 0, y: 22 + i * 60, width: 26, height: 26, rx: 6, fill: '#2a3556' }), SVG('rect', { x: 334, y: 22 + i * 60, width: 26, height: 26, rx: 6, fill: '#2a3556' }));

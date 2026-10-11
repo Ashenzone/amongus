@@ -19,9 +19,10 @@ const SET = [['impostors', 'Infiltrados', 0, 3, 1, v => v || 'Auto'], ['speed', 
   ['discuss', 'Tempo de discussão', 10, 120, 5, v => v + 's'], ['vote', 'Tempo de votação', 10, 120, 5, v => v + 's'], ['tasks', 'Tarefas por jogador', 1, 8, 1, v => v],
   ['killCd', 'Recarga da eliminação', 10, 45, 1, v => v + 's'], ['emergencies', 'Reuniões de emergência', 0, 3, 1, v => v], ['confirm', 'Revelar função do expulso', 0, 1, 1, v => (v ? 'Sim' : 'Não')]];
 let LB = null;
+export const STAGE = { hits: [] };
 export function renderLobby(L, myId, send, minPlayers = 4) {
   LB = L; renderJobs(L, myId, send); const host = L.host === myId; $('lCode').textContent = L.code;
-  const total = L.players.length + (L.bots || 0); $('lCount').textContent = `${L.players.length}/15 jogadores${L.bots ? ` + ${L.bots} bots` : ''} · mínimo ${minPlayers}`;
+  const total = L.players.length; $('lCount').textContent = `${total}/15 jogadores · mínimo ${minPlayers}`;
   const box = $('lSet'); box.innerHTML = '';
   for (const [k, label, min, max, step, fmt] of SET) {
     const w = el('div', 'set'); const b = el('b', null, fmt(L.settings[k])); w.append(el('span', null, label), b);
@@ -34,10 +35,11 @@ export function renderLobby(L, myId, send, minPlayers = 4) {
 export function drawStage() {
   const cv = $('stage'), c = cv.getContext('2d'), w = cv.width, h = cv.height; c.clearRect(0, 0, w, h);
   const g = c.createRadialGradient(w / 2, h, 20, w / 2, h, w * 0.6); g.addColorStop(0, 'rgba(45,226,197,.22)'); g.addColorStop(1, 'rgba(45,226,197,0)'); c.fillStyle = g; c.fillRect(0, 0, w, h);
-  if (!LB) return; const ps = LB.players, rows = ps.length > 8 ? 2 : 1, per = Math.ceil(ps.length / rows), t = performance.now() / 1000;
+  if (!LB) return; const hits = []; STAGE.hits = hits; const ps = LB.players, rows = ps.length > 8 ? 2 : 1, per = Math.ceil(ps.length / rows), t = performance.now() / 1000;
   ps.forEach((p, i) => {
     const row = Math.floor(i / per), idx = i % per, cnt = Math.min(per, ps.length - row * per), x = (w / (cnt + 1)) * (idx + 1), y = rows === 1 ? 250 : 170 + row * 150, s = rows === 1 ? 2.2 : 1.6;
     drawCrew(c, p.look, x, y + Math.max(0, Math.sin(t * 2 + i)) * -4, { t: t + i, s, alpha: p.dc ? 0.4 : 1 });
+    hits.push({ id: p.id, x0: x - 30 * s, x1: x + 30 * s, y0: y - 52 * s, y1: y + 30 });
     c.fillStyle = '#e9f1ff'; c.font = '700 18px "Baloo 2",sans-serif'; c.textAlign = 'center'; c.fillText((p.id === LB.host ? '👑 ' : '') + p.name, x, y + 26);
   });
 }
@@ -76,9 +78,9 @@ export function openMeeting(m, ctx) {
   const by = ctx.roster.get(m.by)?.name || '?'; $('mTitle').textContent = m.reason === 'body' ? `${by} encontrou um corpo!` : `${by} chamou uma reunião de emergência`;
   const list = $('mList'); list.innerHTML = '';
   for (const [id, p] of ctx.roster) {
-    const dead = !m.alive.includes(id), card = el('div', 'card2' + (dead ? ' dead' : '')), cv = el('canvas'); cv.width = 100; cv.height = 120;
-    drawCrew(cv.getContext('2d'), p.look, 50, 108, { s: 1.5, ghost: dead, alpha: dead ? 0.6 : 1, dead });
-    card.append(cv, el('div', 'nm', p.name), el('div', 'vs'));
+    const dead = !m.alive.includes(id), card = el('div', 'card2' + (dead ? ' dead' : '')), cv = el('canvas'); cv.width = 100; cv.height = 124;
+    drawCrew(cv.getContext('2d'), p.look, 50, 118, { s: 1.4, ghost: dead, alpha: dead ? 0.6 : 1, dead });
+    card.append(cv, el('div', 'nm', p.name), el('div', 'vs')); if (ctx.mates && ctx.mates.has(id) && id !== ctx.me) card.append(el('span', 'chip ally', 'ALIADO'));
     card.onclick = () => { if (M.phase !== 'vote' || dead || M.voted || !ctx.alive) return; M.sel = id; M.cards.forEach(c => c.classList.remove('sel')); card.classList.add('sel'); $('mVote').disabled = false; sfx('click'); };
     M.cards.set(id, card); list.append(card);
   }
@@ -92,7 +94,7 @@ export function startVote(time) {
 }
 export function lockVote() { M.voted = true; $('mVote').disabled = true; $('mSkip').disabled = true; $('mNote').textContent = 'Voto registrado. Aguardando os demais…'; }
 export const selectedVote = () => M.sel;
-export function markVoted(id) { const c = M.cards.get(id); if (c && !c.querySelector('.chip')) c.append(el('span', 'chip', '✓')); }
+export function markVoted(id) { const c = M.cards.get(id); if (c && !c.querySelector('.chip.voted')) c.append(el('span', 'chip voted', '✓')); }
 export function addChat(m, roster) {
   const p = roster.get(m.id), l = $('chLog'), row = el('p', m.dead ? 'ghost' : ''); const b = el('b', null, (p?.name || '?') + ':'); b.style.color = COLORS[p?.look.c] || '#fff'; row.append(b, document.createTextNode(m.text)); l.append(row); l.scrollTop = l.scrollHeight; if (l.children.length > 80) l.firstChild.remove();
 }
@@ -124,8 +126,8 @@ export function closeMeeting() { clearInterval(M.iv); cancelAnimationFrame(ejRaf
 // ---------- profissões (configuração do host) ----------
 let jtab = 'inn';
 export function renderJobs(L, myId, send) {
-  const host = L.host === myId, tabs = $('jTabs'), body = $('jBody'); tabs.innerHTML = ''; body.innerHTML = '';
-  for (const [k, label] of [['inn', '🔵 Inocentes'], ['neu', '🟣 Neutros'], ['imp', '🔴 Impostores'], ['rules', '⚙ Regras'], ['bots', '🤖 Bots']]) { const b = el('button', 'btn' + (jtab === k ? ' main' : ''), label); b.onclick = () => { jtab = k; renderJobs(L, myId, send); }; tabs.append(b); }
+  const host = L.host === myId, tabs = $('jTabs'), body = $('jBody'); tabs.innerHTML = ''; body.innerHTML = ''; if (!host && jtab === 'bots') jtab = 'inn';
+  for (const [k, label] of [['inn', '🔵 Inocentes'], ['neu', '🟣 Neutros'], ['imp', '🔴 Impostores'], ['rules', '⚙ Regras'], ['bots', '🤖 Bots']].filter(([k]) => k !== 'bots' || host)) { const b = el('button', 'btn' + (jtab === k ? ' main' : ''), label); b.onclick = () => { jtab = k; renderJobs(L, myId, send); }; tabs.append(b); }
   const slider = (label, k, min, max, step, fmt) => { const w = el('div', 'set'), b = el('b', null, fmt(L.settings[k])); w.append(el('span', null, label), b); const r = el('input'); r.type = 'range'; r.min = min; r.max = max; r.step = step; r.value = L.settings[k]; r.disabled = !host; r.oninput = () => b.textContent = fmt(+r.value); r.onchange = () => send({ t: 'set', k, v: +r.value }); w.append(r); return w; };
   if (jtab === 'bots') {
     const g = el('div', 'jrow'); g.style.gridColumn = '1/3';
@@ -168,4 +170,33 @@ export function showEnd(m, roster, me) {
   $('end').style.background = `radial-gradient(circle,${bg},rgba(4,8,18,.96))`; show('end');
   const won = m.winner === 'crew' ? me.team !== 'imp' && !['joker', 'execution'].includes(me.job) : m.winner === 'imp' ? me.team === 'imp' : m.winner === 'joker' ? me.job === 'joker' : me.job === 'execution';
   sfx(won ? 'win' : 'lose');
+}
+
+// ---------- animação de morte (assassino avança, golpe, vítima cai) ----------
+let kRaf = 0;
+export function killScene(kLook, vLook, role) {
+  document.getElementById('killc')?.remove(); cancelAnimationFrame(kRaf);
+  const cv = document.createElement('canvas'); cv.id = 'killc'; cv.width = innerWidth; cv.height = innerHeight; document.body.append(cv);
+  const c = cv.getContext('2d'), W = cv.width, H = cv.height, sc = Math.min(W, H) / 150, t0 = performance.now(), DUR = 2.6, STRIKE = 0.55, gy = H * 0.74, vx = W * 0.62, victim = role === 'victim'; sfx('kill');
+  (function frame(now) {
+    const t = (now - t0) / 1000; if (t > DUR) { cv.remove(); return; }
+    cv.style.opacity = t > DUR - 0.45 ? (DUR - t) / 0.45 : 1;
+    c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = '#05030a'; c.fillRect(0, 0, W, H);
+    const g = c.createRadialGradient(W / 2, H * 0.6, 10, W / 2, H * 0.6, Math.max(W, H) * 0.7); g.addColorStop(0, 'rgba(170,20,45,.55)'); g.addColorStop(1, 'rgba(5,3,10,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    c.strokeStyle = 'rgba(255,255,255,.08)'; c.lineWidth = 2; for (let i = 0; i < 26; i++) { const a = i * 0.2418 + t * 0.35; c.beginPath(); c.moveTo(W / 2 + Math.cos(a) * Math.max(W, H) * 0.14, H * 0.6 + Math.sin(a) * Math.max(W, H) * 0.14); c.lineTo(W / 2 + Math.cos(a) * Math.max(W, H), H * 0.6 + Math.sin(a) * Math.max(W, H)); c.stroke(); }
+    c.fillStyle = 'rgba(255,255,255,.06)'; c.fillRect(0, gy, W, H - gy);
+    const hit = t > STRIKE, k = hit ? Math.min(1, (t - STRIKE) / 0.7) : 0; c.save(); if (t > STRIKE && t < STRIKE + 0.35) c.translate((Math.random() - 0.5) * 18, (Math.random() - 0.5) * 18);
+    c.save(); c.translate(vx + k * 26 * sc * 0.4, gy); c.rotate(k * 1.5); c.scale(sc, sc); drawCrew(c, vLook, 0, 0, { t, face: -1, dead: hit }); c.restore();
+    if (kLook) { const e = Math.min(1, t / STRIKE), ease = 1 - Math.pow(1 - e, 3), kx = -W * 0.15 + (W * 0.44 + W * 0.15) * ease; c.save(); c.translate(kx, gy); c.rotate(t > STRIKE && t < STRIKE + 0.25 ? 0.22 : 0); c.scale(sc, sc); drawCrew(c, kLook, 0, 0, { t, face: 1, moving: t < STRIKE }); c.restore(); }
+    if (t > STRIKE && t < STRIKE + 0.45) { // golpe estilizado (sem gore): riscos de luz e estrela
+      const p = Math.min(1, (t - STRIKE) / 0.16), a = 1 - Math.max(0, (t - STRIKE - 0.16) / 0.29); c.save(); c.globalAlpha = a; c.shadowColor = '#fff'; c.shadowBlur = 24; c.strokeStyle = '#fff'; c.lineCap = 'round';
+      for (let i = 0; i < 3; i++) { c.lineWidth = (7 - i * 2) * sc * 0.35; c.beginPath(); c.moveTo(vx - 34 * sc + i * 10 * sc, gy - 58 * sc); c.lineTo(vx - 34 * sc + i * 10 * sc + 52 * sc * p, gy - 58 * sc + 52 * sc * p); c.stroke(); }
+      c.shadowBlur = 0; c.fillStyle = '#ffd23d'; for (let i = 0; i < 10; i++) { const an = i * 0.628, r = (14 + 60 * (t - STRIKE) * 2) * sc * 0.6; c.beginPath(); c.arc(vx + Math.cos(an) * r, gy - 26 * sc + Math.sin(an) * r, 3 * sc * 0.35, 0, 6.3); c.fill(); } c.restore();
+    }
+    c.restore();
+    if (t > STRIKE + 0.2 && t < STRIKE + 0.28) { c.fillStyle = 'rgba(255,255,255,.55)'; c.fillRect(0, 0, W, H); }
+    if (t < 0.1) { c.fillStyle = `rgba(255,255,255,${0.7 - t * 7})`; c.fillRect(0, 0, W, H); }
+    if (victim && t > 1.35) { const a = Math.min(1, (t - 1.35) / 0.35); c.globalAlpha = a; c.fillStyle = '#ff4f6d'; c.textAlign = 'center'; c.font = `800 ${Math.max(28, Math.min(W, H) / 8)}px "Baloo 2",system-ui,sans-serif`; c.shadowColor = '#000'; c.shadowBlur = 14; c.fillText('VOCÊ FOI ELIMINADO', W / 2, H * 0.26); c.globalAlpha = 1; c.shadowBlur = 0; }
+    kRaf = requestAnimationFrame(frame);
+  })(t0);
 }
