@@ -14,6 +14,9 @@ const KILL_R = 95, REPORT_R = 150;
 const STN = Object.fromEntries(STATIONS.map(s => [s.id, s]));
 const roomName = (x, y) => roomAt(x, y)?.name || 'um corredor';
 const CENTERS = ROOMS.filter(r => !r.hidden).map(r => ({ x: r.x + r.w / 2, y: r.y + r.h / 2, name: r.name }));
+const PREP = { 'Sala Central': 'na', 'Refeitório': 'no', 'Sala de Controle': 'na', 'Laboratório': 'no', 'Enfermaria': 'na', 'Engenharia': 'na', 'Armazém': 'no', 'Comunicações': 'nas', 'Segurança': 'na', 'Geradores': 'nos', 'Área Externa': 'na', 'Arquivo Secreto': 'no', 'Cabine de Manutenção': 'na' };
+const inR = n => (n === 'um corredor' ? 'num corredor' : `${PREP[n] || 'na'} ${n}`);
+const via = n => (n === 'um corredor' ? 'por um corredor' : `${({ no: 'pelo', na: 'pela', nas: 'pelas', nos: 'pelos' })[PREP[n] || 'na']} ${n}`);
 const JOB_BY_NAME = Object.fromEntries(JOBS.map(j => [j.name.toLowerCase(), j]));
 
 export class Bot {
@@ -22,7 +25,7 @@ export class Bot {
       vis: new Map(), prevVis: new Map(), seen: new Map(), bodies: new Map(), deadKnown: new Set(), meetDead: new Set(), hiddenDead: new Set(), known: new Map(), susp: new Map(), why: new Map(), heat: new Map(),
       ab: { cd: {}, act: {}, us: {}, sup: 0 }, sab: null, cdKill: 99, sabCd: 99, vr: 420, tk: [0, 1], loc: null, goal: null, path: null, pi: 0, repath: 0, pause: 0, work: null, lastIn: '', stuckT: 0, stuckP: { x: p.x, y: p.y },
       phase: 'play', mtg: null, mtgAlive: new Set(), chatQ: [], voted: false, voteAt: 0, supLeft: 0, jp: false, lastKillAt: -99, meetEnd: 0, abT: 0, danger: null, ventUntil: 0, watching: false, watchUntil: 0,
-      lastRoom: '', ended: false, nextPanel: 40, camLed: 0, accusedBy: new Set(), pendKill: null, panelDone: false, deathBy: null, killerJob: null, mtgStart: 0, lastGoalPick: 0, gameT0: 0, usedEmerg: 0, ghostT: 0, comp: new Map() });
+      lastRoom: '', ended: false, nextPanel: 40, camLed: 0, accusedBy: new Set(), pendKill: null, panelDone: false, deathBy: null, killerJob: null, mtgStart: 0, lastGoalPick: 0, gameT0: 0, usedEmerg: 0, ghostT: 0, comp: new Map(), replies: 0, lastReplyAt: -99, said: new Set() });
     this.trait = { chatty: rnd(0.7, 1.3), brave: rnd(0.6, 1.4), curious: rnd(0.6, 1.4) };
   }
   c(k) { return this.room.settings[k]; }
@@ -107,7 +110,7 @@ export class Bot {
     if (!this.imp && this.p.alive && !this.bodies.size && m.k === 'killg') this.hiddenDead.add(m.id);
   }
   onMeeting(m) {
-    Object.assign(this, { phase: 'meet', mtg: m, voted: false, mtgAlive: new Set(m.alive), panelDone: false, mtgStart: this.clock, goal: null, path: null, work: null, watching: false, ventUntil: 0, pendKill: null, danger: null });
+    Object.assign(this, { phase: 'meet', mtg: m, voted: false, mtgAlive: new Set(m.alive), panelDone: false, mtgStart: this.clock, goal: null, path: null, work: null, watching: false, ventUntil: 0, pendKill: null, danger: null, replies: 0, said: new Set() });
     for (const d of m.dead) { this.deadKnown.add(d); this.meetDead.add(d); this.hiddenDead.delete(d); } this.bodies.clear(); this.accusedBy.clear(); this.heat.clear();
     this.chatQ = this.p.alive ? this.compose(m) : [];
   }
@@ -124,13 +127,70 @@ export class Bot {
   }
   onPanel(list) { for (const [id, al] of list) if (!al) { this.deadKnown.add(id); if (!this.meetDead.has(id) && !this.bodies.has(id)) this.hiddenDead.add(id); } }
   hear(m) {
-    if (m.id === this.p.id) return; const text = String(m.text).toLowerCase();
+    this.said.add(String(m.text).toLowerCase().replace(/^[^:]{1,14}:\s*/, ''));
+    if (m.id === this.p.id) return; const text = String(m.text).toLowerCase(), myName = (this.roster.get(this.p.id)?.name || '').toLowerCase();
     const accuse = /(sus|suspeit|matou|impostor|mentiu|mente|mentira|vent|duto|sumiu|perto do corpo|votem|votar|vota |foi o|foi a|culpa|estranh)/.test(text), defend = /(inocente|limpo|confio|n[aã]o foi|n[aã]o fui|tava|estava|fazendo task)/.test(text);
-    const trust = 1 - (this.susp.get(m.id) ?? 20) / 130;
+    const trust = 1 - (this.susp.get(m.id) ?? 20) / 130, mentioned = [];
     for (const [id, r] of this.roster) {
-      if (id === m.id || !text.includes(r.name.toLowerCase())) continue;
-      if (accuse) { this.heat.set(id, (this.heat.get(id) || 0) + 1); this.sus(id, 13 * trust, 'accused'); if (id === this.p.id && !this.accusedBy.has(m.id)) { this.accusedBy.add(m.id); this.defend(m.id); } }
+      if (id === m.id || !text.includes(r.name.toLowerCase())) continue; mentioned.push(id);
+      if (accuse) { this.heat.set(id, (this.heat.get(id) || 0) + 1); this.sus(id, 13 * trust, 'accused'); }
       else if (defend) this.sus(id, -5 * trust);
+    }
+    if (this.p.alive && (this.room.phase === 'meet' || this.room.phase === 'vote')) this.respond(m, text, mentioned, myName.length > 1 && text.includes(myName), accuse);
+  }
+  // Intenção da mensagem (português informal) e resposta natural, com atraso, limite por reunião e personalidade da profissão.
+  intentOf(t) {
+    const has = re => re.test(t);
+    if (has(/\b(bot|rob[oô]|ia|intelig[eê]ncia artificial|computador)\b/)) return 'bot';
+    if (has(/(qual|que)\b.*\b(profiss|fun[cç][aã]o|role|cargo|papel)/) || has(/\b(voc[eê]|vc|tu)\s+[eé]\s+(o\s+|a\s+)?(detetive|xerife|cientista|engenheiro|juiz|mentalista|localizador|barulhento)/)) return 'job';
+    if (has(/\b(onde|aonde)\b/)) return 'where';
+    if (has(/(vota|votem|votar|vamos votar|vamos tirar|ejeta|ejetar|mandar embora)/)) return 'vote';
+    if (has(/(quem (foi|matou|viu|sabe|achou)|algu[eé]m (viu|sabe|tem)|ningu[eé]m (viu|sabe)|viu algo|viu alguma|tem (alguma )?(pista|info))/) || has(/\b(voc[eê]|vc|tu)\b.*\b(viu|sabe)\b/)) return 'info';
+    if (has(/(skip|pula|pular)/)) return 'skip';
+    if (has(/\b(oi|ol[aá]|eae|e a[ií]|salve|fala|opa|hey|boa noite|bom dia|boa tarde)\b/)) return 'greet';
+    if (has(/\?/)) return 'question';
+    return 'generic';
+  }
+  respond(m, text, mentioned, toMe, accuse) {
+    const talk = this.pc('bot_talk'), cap = 1 + Math.round(talk * 5), me = this.p.id;
+    if (this.replies >= (toMe ? cap + 4 : cap)) return; if (this.clock - this.lastReplyAt < 2.5) return;
+    const intent = this.intentOf(text), others = mentioned.filter(i => i !== me), accusedMe = toMe && accuse, pron = /\b(voc[eê]s?|vcs?|tu|todos|pessoal|galera|gente|alguém|alguem)\b/.test(text);
+    let p;
+    if (accusedMe) p = 1;
+    else if (toMe) p = 0.96 + 0.04 * talk;
+    else if (others.length) p = intent === 'vote' || accuse ? 0.12 + 0.35 * talk : 0; // fala com/sobre outro jogador
+    else if (intent === 'greet') p = 0.08 + 0.3 * talk; else if (['where', 'info', 'bot', 'job'].includes(intent)) p = 0.12 + 0.4 * talk; // pergunta para a sala toda
+    else if (intent === 'vote') return; // "votar em quem?" não gera cadeia de respostas
+    else if (intent === 'skip') p = pron ? 0.1 + 0.2 * talk : 0.04; else p = intent === 'question' ? 0 : 0.03;
+    if (!roll(p)) return;
+    const text2 = this.replyText(m, !toMe && others.length && (accuse || intent === 'vote') ? 'vote' : intent, others, accusedMe, toMe); if (!text2) return;
+    const at = this.clock + rnd(1.3, 3.4) + text2.length * 0.03; this.replies++; this.lastReplyAt = at; this.chatQ.push({ at, text: text2.slice(0, 140), reply: m.id }); this.chatQ.sort((a, b) => a.at - b.at);
+  }
+  replyText(m, intent, others, accusedMe, toMe) {
+    const me = this.p.id, J = this.job, imp = this.imp, from = this.nm(m.id), room = this.lastRoom || 'um corredor', lieRoom = pick(CENTERS).name, pre = (toMe || roll(0.3)) && roll(0.6) ? from + ': ' : '';
+    const top = this.topSuspect(), reason = id => ({ near: 'estava perto do corpo', vent: 'sumiu perto de um duto', sumiu: 'sumiu do nada na minha frente', duplo: 'apareceu duplicado', transformou: 'mudou de aparência', kill: 'eu vi matando', tone: 'tem a cor da pista', accused: 'tá todo mundo falando dele', last: 'foi o último que vi com a vítima' })[this.why.get(id)] || 'age de forma estranha';
+    if (accusedMe) { const o = this.lieTarget(m.id); return ((imp || J === 'joker') ? pick([`Eu? Tava ${inR(lieRoom)} fazendo task. E o ${o}?`, `Que absurdo! Não fui eu, olha o ${o}.`, `Sem prova não vale, ${from}.`]) : pick([`Não fui eu! Eu tava ${inR(room)} fazendo task.`, `Eu? Tava ${inR(room)} o tempo todo.`, `Calma, ${from}, eu tava ${inR(room)}.`])); }
+    switch (intent) {
+      case 'bot': return pick([`Bot? kkkk claro que não, tô só jogando.`, `Haha que? Sou gente, ${from}.`, `Que ideia, eu tô aqui jogando normal.`]);
+      case 'job': return pre + pick([`Sou só tripulante, tava fazendo task.`, `Tripulante normal, nada de especial.`, `Prefiro não falar de função agora.`]);
+      case 'where': return pre + (imp ? pick([`Tava ${inR(lieRoom)} fazendo task.`, `Passei ${via(lieRoom)} e vim pra cá.`]) : J === 'joker' ? pick([`Sei lá, andando por aí. E você?`, `Na ${lieRoom}, acho. Ninguém me viu?`]) : pick([`Tava ${inR(room)}, fazendo task.`, `Passei ${via(room)} agora há pouco.`, `Fiquei ${inR(room)}, não vi ninguém estranho.`]));
+      case 'info': {
+        if (J === 'detetive' && this.toneHint) return pre + `Tenho uma pista: a cor de quem matou é ${this.toneHint}.`;
+        if (imp) { const o = this.lieTarget(m.id); return pre + pick([`Vi o ${o} sozinho perto de lá.`, `Não vi nada, mas o ${o} tava estranho.`, `Só passei por lá, não vi nada.`]); }
+        if (top && top.v >= 32) return pre + pick([`Só desconfio do ${this.nm(top.id)}: ${reason(top.id)}.`, `O ${this.nm(top.id)} ${reason(top.id)}.`]);
+        return pre + pick([`Não vi nada, infelizmente.`, `Sem informação aqui, e vocês?`, `Não sei de nada ainda.`]);
+      }
+      case 'vote': {
+        const x = others[0]; if (x == null) return pre + pick([`Votar em quem?`, `Em quem? Tem alguma prova?`]); const n = this.nm(x), e = this.evidence(x) + (this.heat.get(x) || 0) * 8;
+        if (J === 'execution') return x === this.target ? pick([`Concordo, voto no ${n} também!`, `Isso, vamos de ${n}.`]) : pick([`Hmm, eu desconfio mais do ${this.nm(this.target ?? x)}.`, `Será? Eu acho o ${this.nm(this.target ?? x)} mais suspeito.`]);
+        if (imp) return this.mates.has(x) ? pick([`Calma, sem prova não dá pra votar no ${n}.`, `O ${n} tava comigo, não acho justo.`]) : pick([`Concordo, o ${n} tava estranho.`, `Boa, também voto no ${n}.`, `Faz sentido, vamos no ${n}.`]);
+        if (J === 'joker') return pick([`Eu votaria no ${n} também. Ou em mim, sei lá.`, `Hmm, não sei, ${n} pode ser.`]);
+        return e >= 38 ? pick([`Concordo, o ${n} ${reason(x)}.`, `Também desconfio do ${n}, ${reason(x)}.`]) : pick([`Por que o ${n}? Tem alguma prova?`, `Não tenho certeza do ${n}, o que você viu?`]);
+      }
+      case 'skip': return pre + (top && top.v >= 40 && !imp ? `Eu não vou pular, voto no ${this.nm(top.id)}.` : pick([`Sem info eu pulo também.`, `Pular não ajuda se tiver impostor vivo...`]));
+      case 'greet': return pick([`Oi!`, `E aí, ${from}.`, `Fala aí!`, `Opa, tudo certo?`]);
+      case 'question': return pre + pick([`Boa pergunta, não sei.`, `Não vi nada, e você?`, `Hmm, tô tentando entender também.`]);
+      default: return toMe ? pre + pick([`Fala, tô ouvindo.`, `Pode explicar melhor?`, `Tô de olho em todo mundo.`, `Concordo.`]) : null;
     }
   }
 
@@ -333,7 +393,7 @@ export class Bot {
     const p = this.p, t = this.clock - this.mtgStart;
     if (p.alive) {
       if (!this.panelDone && t > 1.2) { this.panelDone = true; this.meetAbilities(); }
-      const q = this.chatQ[0]; if (q && this.clock >= q.at) { this.chatQ.shift(); this.act({ t: 'chat', text: q.text }); }
+      const q = this.chatQ[0]; if (q && this.clock >= q.at && this.clock - (this.lastSend ?? -9) >= 1) { this.chatQ.shift(); if (q.reply != null && this.said.has(q.text.toLowerCase().replace(/^[^:]{1,14}:\s*/, ''))) return; this.lastSend = this.clock; this.act({ t: 'chat', text: q.text }); }
     } else if (this.ghostJob === 'influencer' && !this.panelDone && t > 1.5) { this.panelDone = true; this.infSend(); }
   }
   meetAbilities() {
@@ -347,9 +407,9 @@ export class Bot {
     this.act({ t: 'ab', a: 'infmsg', to, kind });
   }
   defend(accuser) {
-    if (!roll(0.35 + this.pc('bot_talk') * 0.6) || !this.p.alive) return; const at = this.clock + rnd(1.5, 4), room = this.lastRoom || 'um corredor', J = this.job, me = this.p.id; let text;
-    if (this.imp || J === 'joker') { const o = this.lieTarget(accuser); text = pick([`Eu? Tava na ${pick(CENTERS).name} fazendo task. E o ${o}, ninguém viu ele?`, `Que absurdo, ${this.nm(accuser)}. Tá tentando me tirar do jogo?`, `Não fui eu! Vi o ${o} bem estranho antes.`]); }
-    else text = pick([`Não fui eu, eu tava na ${room} fazendo task.`, `Pode confiar, tava na ${room} o tempo todo.`, `Eu? Nunca! Estava na ${room}.`]);
+    if (!roll(0.9) || !this.p.alive) return; const at = this.clock + rnd(1.5, 4), room = this.lastRoom || 'um corredor', J = this.job, me = this.p.id; let text;
+    if (this.imp || J === 'joker') { const o = this.lieTarget(accuser); text = pick([`Eu? Tava ${inR(pick(CENTERS).name)} fazendo task. E o ${o}, ninguém viu ele?`, `Que absurdo, ${this.nm(accuser)}. Tá tentando me tirar do jogo?`, `Não fui eu! Vi o ${o} bem estranho antes.`]); }
+    else text = pick([`Não fui eu, eu tava ${inR(room)} fazendo task.`, `Pode confiar, tava ${inR(room)} o tempo todo.`, `Eu? Nunca! Estava ${inR(room)}.`]);
     this.chatQ.push({ at, text }); this.chatQ.sort((a, b) => a.at - b.at);
   }
   lieTarget(excl) {
@@ -360,10 +420,10 @@ export class Bot {
     const out = [], me = this.p.id, imp = this.imp, J = this.job, D = this.room.settings.discuss, room = this.lastRoom || 'um corredor';
     const nMsg = Math.max(0, Math.round(this.pc('bot_talk') * this.trait.chatty * rnd(1, 3.6))), body = m.body != null ? m.body : null;
     const top = this.topSuspect(); const reason = id => ({ near: 'estava perto do corpo', vent: 'sumiu perto de um duto', sumiu: 'sumiu do nada na minha frente', duplo: 'apareceu duplicado', transformou: 'mudou de aparência', kill: 'eu vi matando', tone: 'tem a cor da pista', accused: 'tá muito suspeito', last: 'foi o último que vi com a vítima' })[this.why.get(id)] || 'age de forma estranha';
-    if (m.by === me) out.push(m.reason === 'body' ? pick([`Achei um corpo na ${room}!`, `Corpo na ${room}, gente!`, `Morreu alguém na ${room}.`]) : pick([`Chamei porque tem algo errado.`, `Reunião: precisamos conversar.`]));
+    if (m.by === me) out.push(m.reason === 'body' ? pick([`Achei um corpo ${inR(room)}!`, `Corpo ${inR(room)}, gente!`, `Morreu alguém ${inR(room)}.`]) : pick([`Chamei porque tem algo errado.`, `Reunião: precisamos conversar.`]));
     if (J === 'detetive' && this.toneHint) out.push(`Minha pista aponta para cor ${this.toneHint}.`);
     if (!imp && J !== 'joker' && J !== 'execution') {
-      out.push(pick([`Eu tava na ${room} fazendo task.`, `Estava na ${room}, não vi nada.`, `Passei pela ${room} agora há pouco.`]));
+      out.push(pick([`Eu tava ${inR(room)} fazendo task.`, `Estava ${inR(room)}, não vi nada.`, `Passei ${via(room)} agora há pouco.`]));
       if (top && top.v >= 32) out.push(pick([`Acho o ${this.nm(top.id)} suspeito: ${reason(top.id)}.`, `Desconfio do ${this.nm(top.id)}, ${reason(top.id)}.`, `${this.nm(top.id)} ${reason(top.id)}. Voto nele.`]));
       else out.push(pick([`Não tenho certeza de ninguém ainda.`, `Sem informação, vou pular se ninguém tiver nada.`]));
       if (this.hiddenDead.size) out.push(`Alguém morreu e ninguém achou o corpo, tem algo estranho.`);
@@ -372,16 +432,16 @@ export class Bot {
       if (J === 'juiz' && this.supLeft > 0 && top && top.v > 80) out.push(`Se for preciso, eu resolvo isso.`);
     } else if (imp) {
       const o = this.lieTarget(-1), r2 = pick(CENTERS).name;
-      out.push(pick([`Eu tava na ${r2} fazendo task.`, `Fiquei na ${r2} o tempo todo.`, `Passei na ${r2} e depois vim pra cá.`]));
+      out.push(pick([`Eu tava ${inR(r2)} fazendo task.`, `Fiquei ${inR(r2)} o tempo todo.`, `Passei ${inR(r2)} e depois vim pra cá.`]));
       if (roll(0.3 + this.pc('bot_lie') * 0.65)) out.push(pick([`Vi o ${o} perto do corpo, ${pick(['achei estranho', 'saindo correndo', 'sozinho'])}.`, `O ${o} tá muito suspeito, votem nele.`, `Desconfio do ${o}, sumiu depois.`]));
       if (roll(0.2)) out.push(pick([`Sem acusação sem prova, galera.`, `Calma, vamos pensar antes de votar.`]));
     } else if (J === 'execution') {
       const t = this.nm(this.target ?? -1), r2 = pick(CENTERS).name;
-      out.push(pick([`O ${t} tava estranho, vi ele na ${r2} sozinho.`, `Não confio no ${t}.`, `${t} some toda hora, voto nele.`]));
+      out.push(pick([`O ${t} tava estranho, vi ele ${inR(r2)} sozinho.`, `Não confio no ${t}.`, `${t} some toda hora, voto nele.`]));
       out.push(pick([`Alguém mais viu o ${t}?`, `Todo mundo devia votar no ${t}.`]));
     } else if (J === 'joker') {
       const o = this.lieTarget(-1);
-      out.push(pick([`Não vi ninguém. Mas o ${o} me seguiu.`, `Tava na ${pick(CENTERS).name}, mas não sei se alguém me viu.`, `Sei lá, ${o} tá com cara de culpado.`, `Hmm... foi o ${o}? Ou foi o ${this.nm(pick([...this.mtgAlive]))}?`]));
+      out.push(pick([`Não vi ninguém. Mas o ${o} me seguiu.`, `Tava ${inR(pick(CENTERS).name)}, mas não sei se alguém me viu.`, `Sei lá, ${o} tá com cara de culpado.`, `Hmm... foi o ${o}? Ou foi o ${this.nm(pick([...this.mtgAlive]))}?`]));
       out.push(pick([`Eu tava perto do corpo, mas só passei por ali.`, `Ninguém me viu fazendo task, né? Estranho.`]));
     }
     const slots = out.slice(0, Math.max(nMsg, m.by === me ? 1 : 0)), res = []; let at = this.clock + rnd(1.5, 5);

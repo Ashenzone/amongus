@@ -36,6 +36,7 @@ No lobby: PROFISSÕES → aba **🤖 Bots** (ativar, quantidade, nomes e 14 par�
 - Bots entram na partida como jogadores normais, com os nomes definidos pelo admin (sem duplicar; vazio = nomes automáticos) e nada os identifica como bots.
 - Recebem as mesmas mensagens de um cliente (visão limitada, avisos, chat) e agem pelas mesmas mensagens (mover, kill, votar, habilidades), então regras, profissões e recargas são idênticas às dos humanos. Não leem o estado dos outros jogadores no servidor.
 - Objetivos por prioridade: reportar corpo, consertar sabotagem, fugir, caçar/seguir, tarefas (reais ou fingidas), explorar, câmeras. Memória de suspeitas (quem estava perto do corpo, sumiu perto de duto, mudou de aparência, última companhia da vítima, pistas das habilidades, acusações no chat) usada no chat e no voto.
+- **Os bots conversam:** durante as reuniões entendem o que os jogadores escrevem (cumprimentos, "onde você estava?", "alguém viu algo?", "votem no X", acusações, "qual sua profissão?", "você é um bot?") e respondem com atraso natural, com limite por reunião e no estilo da profissão (impostores mentem). Mencionar o nome de um bot garante resposta.
 - Parâmetros: habilidade, erro, reação, hesitação, grupo, tarefas, suspeita, câmeras, habilidades, agressividade, sabotagem, mentira, conversa.
 
 ## Câmeras e setas
