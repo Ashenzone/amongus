@@ -28,19 +28,19 @@ export const JOBS = [
 export const JOB = Object.fromEntries(JOBS.map(x => [x.id, x]));
 // Parâmetros configuráveis pelo host (k, rótulo, mín, máx, passo, padrão)
 const P = (k, label, min, max, step, def, grp) => ({ k, label, min, max, step, def, grp });
-export const PARAMS = [
+const PARAMS_RAW = [
   P('eng_vent', 'Engenheiro: recarga do duto (s)', 5, 60, 1, 20, 'Engenheiro'), P('eng_fix', 'Engenheiro: recarga do conserto remoto (s)', 10, 180, 5, 60, 'Engenheiro'),
   P('cie_uses', 'Cientista: usos do painel por reunião', 1, 9, 1, 3, 'Cientista'),
   P('jui_uses', 'Juiz/Mentalista: usos do Voto Supremo', 1, 3, 1, 1, 'Juiz'),
   P('loc_cd', 'Localizador: recarga (s)', 5, 90, 1, 25, 'Localizador'), P('loc_dur', 'Localizador: duração do rastreio (s)', 10, 120, 5, 40, 'Localizador'),
   P('xer_cd', 'Xerife/Mentalista: recarga do tiro (s)', 10, 90, 1, 30, 'Xerife'),
-  P('men_inv', 'Mentalista: tempo parado na sondagem (s)', 2, 15, 1, 5, 'Mentalista'), P('men_cd', 'Mentalista: recarga da sondagem (s)', 5, 90, 1, 15, 'Mentalista'), P('men_cd', 'Mentalista: recarga da sondagem (s)', 5, 120, 5, 20, 'Mentalista'),
-  P('anj_dur', 'Anjo: duração do escudo (s)', 10, 120, 5, 60, 'Anjo'), P('anj_cd', 'Anjo: espera extra após o escudo (s)', 0, 60, 5, 0, 'Anjo'),
+  P('men_inv', 'Mentalista: tempo parado na sondagem (s)', 2, 15, 1, 5, 'Mentalista'), P('men_cd', 'Mentalista: recarga da sondagem (s)', 5, 120, 5, 20, 'Mentalista'), P('anj_dur', 'Anjo: duração do escudo (s)', 10, 120, 5, 60, 'Anjo'), P('anj_cd', 'Anjo: espera extra após o escudo (s)', 0, 60, 5, 0, 'Anjo'),
   P('inf_uses', 'Influencer: mensagens por reunião', 1, 3, 1, 1, 'Influencer'),
   P('vib_van', 'Víbora: sumiço do corpo (s)', 2, 20, 1, 5, 'Víbora'),
   P('met_dur', 'Metamorfo: duração (s)', 5, 90, 5, 30, 'Metamorfo'), P('met_cd', 'Metamorfo: recarga (s)', 5, 90, 5, 20, 'Metamorfo'),
   P('esp_dur', 'Espectro: duração da invisibilidade (s)', 3, 30, 1, 10, 'Espectro'), P('esp_cd', 'Espectro: recarga (s)', 5, 90, 5, 25, 'Espectro'),
 ];
+export const PARAMS = PARAMS_RAW.filter((p, i, a) => a.findIndex(q => q.k === p.k) === i); // chaves únicas
 export const DEFAULT_SETTINGS = { neutrals: 1 };
 export const SETTING_LIMITS = { neutrals: [0, 4] };
 for (const x of JOBS) { DEFAULT_SETTINGS['w_' + x.id] = x.w; DEFAULT_SETTINGS['m_' + x.id] = x.m; SETTING_LIMITS['w_' + x.id] = [0, 100]; SETTING_LIMITS['m_' + x.id] = [0, x.m > 4 ? 15 : 4]; }

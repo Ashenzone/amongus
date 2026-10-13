@@ -270,7 +270,7 @@ export class Room {
         if (this.alive().every(q => q.voted || (!q.ws && !q.bot))) this.finishVote(); } break;
       case 'chat': { if (ph !== 'meet' && ph !== 'vote') break; const now = Date.now(); if (now - p.chatAt < 700) break; p.chatAt = now;
         const text = String(m.text || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 140); if (!text) break;
-        this.all({ t: 'chat', id: p.id, text, dead: !p.alive }, q => q.alive === p.alive); break; }
+        this.all({ t: 'chat', id: p.id, text, dead: !p.alive }, q => p.alive || !q.alive); break; }
     }
   }
   taskHooks(p) {
@@ -288,7 +288,7 @@ export class Room {
       this.bodies.push({ id: v.id, x: v.x, y: v.y, killer: killer?.id ?? null, arrow: v.job === 'barulhento', g: vib, vanish: vib ? this.settings.vib_van : 0 });
       this.all({ t: 'fx', k: vib ? 'killg' : 'kill', id: v.id, x: v.x | 0, y: v.y | 0 }, q => !q.alive || dist(q, v) <= this.visR(q) * 1.3);
     }
-    if (body) { this.send(v, { t: 'kanim', k: kap, v: vap, r: 'victim' }); if (killer) this.send(killer, { t: 'kanim', k: kap, v: vap, r: 'killer' }); }
+    if (body) this.send(v, { t: 'kanim', k: kap, v: vap, r: 'victim' }); // a cena aparece só para quem morre
     this.send(v, { t: 'died', by: killer ? 'kill' : 'vote' });
     // alvo do Execution morreu por outros meios
     for (const q of this.list) if (q.job === 'execution' && q.target === v.id && q.alive && killer) { q.target = null; this.send(q, { t: 'err', msg: 'Seu alvo morreu. Você agora joga pela sobrevivência.' }); }
@@ -404,9 +404,10 @@ export class Room {
 
   // ---------- reuniões ----------
   meeting(by, reason, bodyId = null) {
+    const bd = bodyId != null ? this.bodies.find(b => b.id === bodyId) : null;
     for (const p of this.list) { p.vote = null; p.voted = false; p.ix = p.iy = 0; p.vent = -1; p.morph = null; p.act = {}; p.track = null; p.probe = null; p.watch = false; }
     Object.assign(this, { phase: 'meet', timer: this.settings.discuss, sab: null, bodies: [], supreme: null, meet: { by: by.id, reason, body: bodyId } });
-    this.all({ t: 'meeting', by: by.id, reason, body: bodyId, time: this.settings.discuss, alive: this.alive().map(p => p.id), dead: this.list.filter(p => !p.alive || p.gone).map(p => p.id) });
+    this.all({ t: 'meeting', by: by.id, reason, body: bodyId, bpos: bd ? [bd.x | 0, bd.y | 0] : null, time: this.settings.discuss, alive: this.alive().map(p => p.id), dead: this.list.filter(p => !p.alive || p.gone).map(p => p.id) });
     for (const p of this.list) if (p.supLeft > 0 && p.alive) this.send(p, { t: 'sup', left: p.supLeft });
   }
   nextPhase() {

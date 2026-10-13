@@ -10,7 +10,7 @@ import { JOB, TEAMS, ABIL, INF_MSGS } from '/shared/jobs.js';
 
 const $ = id => document.getElementById(id);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-const P = Object.assign({ name: '', look: { c: Math.floor(Math.random() * 12), h: 0, o: 0, a: 0, m: 0, s: 0 }, vol: { ...A.vol }, q: 1, arr: 0 }, JSON.parse(localStorage.getItem('quorum.p') || '{}'));
+const P = Object.assign({ name: '', look: { c: Math.floor(Math.random() * 12), h: 0, o: 0, a: 0, m: 0, s: 0 }, vol: { ...A.vol }, q: 1, arr: 0, device: null }, JSON.parse(localStorage.getItem('quorum.p') || '{}'));
 const save = () => localStorage.setItem('quorum.p', JSON.stringify(P));
 Object.assign(A.vol, P.vol); setQuality(P.q);
 
@@ -18,6 +18,7 @@ const S = { phase: 'menu', id: null, roster: new Map(), role: null, mates: new S
   players: new Map(), bodies: [], myTasks: [], sab: null, vr: 900, look: P.look, name: P.name, acting: 0, cd: [0, 0], intro: 0, tk: [0, 1], settings: { speed: 1, emergencies: 1 },
   emergUsed: 0, hideMe: true, lobby: null, onDoor: () => sfx('door'), job: null, team: null, ghostJob: null, target: null, known: new Map(), ab: { cd: {}, act: {}, us: {}, sup: 0 }, arrows: [], loc: null, probe: null, meInv: false, meShield: 0, sup: 0, supMode: false, _ej: null, cams: null, camsOn: false, view: null, introEnd: 0, bg: { x: SPECIAL.spawn.x, y: SPECIAL.spawn.y }, jobPanel: false, joy: { x: 0, y: 0 }, touch: false };
 const send = o => net.send(o);
+Object.assign(S, { deadKnown: new Set(), meetPos: null, meetBody: null });
 initRender($('game'));
 
 // ---------- navegação ----------
@@ -46,7 +47,7 @@ $('stage').addEventListener('click', e => { // clicar no personagem abre a perso
   if (!h || !S.lobby) return; if (h.id === S.id) return openCustom(P.look, saveMine);
   if (S.lobby.host === S.id) { const pl = S.lobby.players.find(q => q.id === h.id); if (pl) openCustom(pl.look, look => { send({ t: 'botlook', id: h.id, look }); back(); }); }
 });
-$('mSettings').onclick = () => { initAudio(); UI.initSettings(P, save); go('settings'); };
+$('mSettings').onclick = () => { initAudio(); UI.initSettings(P, save, applyDevice); go('settings'); };
 document.querySelectorAll('[data-back]').forEach(b => b.onclick = back);
 $('lJobs').onclick = () => go('jobs');
 $('lLeave').onclick = () => { send({ t: 'leave' }); toMenu(); };
@@ -69,7 +70,7 @@ net.on('lobby', m => {
 });
 function begin(m, resume) {
   S.phase = 'play'; S.role = m.role; S.mates = new Set(m.mates.map(x => x[0])); S.known = new Map(m.mates); S.job = m.job; S.team = m.team; S.ghostJob = m.ghostJob; S.target = m.target; S.sup = m.sup || 0; S.jobPanel = !!m.jp; S.supMode = false; S.arrows = []; S.loc = null; S._ej = null; S.roster = new Map(m.players.map(p => [p.id, p])); S.myTasks = m.tasks.map(t => ({ ...t }));
-  Object.assign(S.me, { x: m.x, y: m.y, alive: m.alive !== false, vent: -1, moving: false }); S.players.clear(); S.bodies = []; S.sab = null; S.emergUsed = m.emergUsed || 0; S.settings = m.settings;
+  Object.assign(S.me, { x: m.x, y: m.y, alive: m.alive !== false, vent: -1, moving: false }); S.players.clear(); S.bodies = []; S.deadKnown = new Set(); S.sab = null; S.emergUsed = m.emergUsed || 0; S.settings = m.settings;
   const mine = S.roster.get(S.id); S.look = mine.look; S.name = mine.name; S.hideMe = false; S.vr = 420; R.cam.x = m.x; R.cam.y = m.y; R.vis = 420;
   go(null); $('hud').classList.remove('hide'); $('sabMenu').classList.add('hide');
   const imp = S.role === 'imp'; document.querySelectorAll('#bSab,#bKill').forEach(b => b.classList.toggle('hide', !imp)); $('bigmap').classList.add('hide');
@@ -104,14 +105,14 @@ net.on('snap', m => {
     const r = S.roster.get(ap ?? id) || { name: '?', look: P.look }; Object.assign(p, { look: r.look, name: r.name, tx: px, ty: py, face: f, moving: !!mv, ghost: !!g, inv: !!iv });
   }
   for (const id of [...S.players.keys()]) if (!seen.has(id)) S.players.delete(id);
-  S.bodies = m.bd.map(([id, bx, by, bg]) => ({ id, x: bx, y: by, g: !!bg, look: (S.roster.get(id) || { look: P.look }).look }));
+  S.bodies = m.bd.map(([id, bx, by, bg]) => ({ id, x: bx, y: by, g: !!bg, look: (S.roster.get(id) || { look: P.look }).look })); for (const b of S.bodies) S.deadKnown.add(b.id);
   const hadSab = S.sab; S.sab = m.sab; S.vr = m.vr; S.cd = m.cd || [0, 0]; S.tk = m.tk; S.intro = m.intro; S.ab = m.ab; S.loc = m.loc; S.probe = m.probe; S.sup = m.ab.sup;
   S.cams = m.cams || null; S.camsOn = !!m.co; $('hud').classList.toggle('incam', !!m.cams); $('camUI').classList.toggle('hide', !m.cams);
   S.arrows = buildArrows(m, vent);
   if (!!hadSab !== !!S.sab || hadSab?.k !== S.sab?.k) alarm(S.sab?.k === 'heat');
 });
 net.on('taskOk', m => { const t = S.myTasks.find(q => q.id === m.id); if (t) t.done = true; hudTasks(); });
-net.on('fx', m => { const r = S.roster.get(m.id); if (!r) return; R.dying.push({ x: m.x, y: m.y, look: r.look, t: 0 }); fx(m.k, m.x, m.y, m.k === 'killg' ? '#4fd36b' : '#ff4f6d'); sfx('kill'); });
+net.on('fx', m => { S.deadKnown.add(m.id); const r = S.roster.get(m.id); if (!r) return; R.dying.push({ x: m.x, y: m.y, look: r.look, t: 0 }); fx(m.k, m.x, m.y, m.k === 'killg' ? '#4fd36b' : '#ff4f6d'); sfx('kill'); });
 net.on('died', () => { S.me.alive = false; closeTaskUi(); S.arrows = []; S.loc = null; buildAbil(); UI.toast(S.role === 'imp' ? 'Você foi expulso. Continue como fantasma.' : 'Você foi eliminado. Agora você é um fantasma.'); });
 net.on('sab', m => { sfx(m.k === 'lights' ? 'blackout' : 'sabotage'); addShake(8); });
 net.on('sabPart', () => sfx('fixed'));
@@ -254,7 +255,7 @@ function updAbil(me) {
 const abilN = i => { const b = $('abil').children[i]; if (b && !b.disabled) useAbility(b.dataset.id); };
 function useAbility(id) {
   const ph = S.phase; if (ph !== 'play' && !((id === 'panel' || id === 'infmsg') && (ph === 'meet' || ph === 'vote'))) return;
-  const all = [...S.roster].map(([i, r]) => ({ id: i, name: r.name, look: r.look })), others = all.filter(x => x.id !== S.id);
+  const all = [...S.roster].map(([i, r]) => ({ id: i, name: r.name, look: r.look, dead: S.deadKnown.has(i) })), others = all.filter(x => x.id !== S.id);
   if (id === 'locate') return UI.pick('Rastrear quem?', others, to => send({ t: 'ab', a: 'locate', to }));
   if (id === 'shield') return UI.pick('Proteger quem?', all, to => send({ t: 'ab', a: 'shield', to }));
   if (id === 'morph') return S.ab.act.morph > 0 ? send({ t: 'ab', a: 'morph' }) : UI.pick('Transformar-se em quem?', others, to => send({ t: 'ab', a: 'morph', to }));
@@ -269,13 +270,16 @@ function setObj(me) {
 const big = $('bigmap'), bc = big.getContext('2d'), bs = big.width / WORLD.w;
 const toggleMap = () => { if (S.phase === 'play') big.classList.toggle('hide'); };
 function drawBig() {
+  const inM = S.phase !== 'play', pos = inM ? (S.meetPos || S.me) : S.me, t = performance.now() / 1000;
   bc.fillStyle = '#0a1226'; bc.fillRect(0, 0, big.width, big.height); bc.fillStyle = '#3d5385'; for (const r of RECTS) bc.fillRect(r.x * bs, r.y * bs, r.w * bs, r.h * bs);
   bc.textAlign = 'center'; bc.font = '700 13px sans-serif';
-  if (S.sab?.k === 'comms') { bc.fillStyle = '#ff4f6d'; bc.font = '800 34px sans-serif'; bc.fillText('SEM SINAL', big.width / 2, big.height / 2); return; }
+  if (!inM && S.sab?.k === 'comms') { bc.fillStyle = '#ff4f6d'; bc.font = '800 34px sans-serif'; bc.fillText('SEM SINAL', big.width / 2, big.height / 2); return; }
   bc.fillStyle = '#dfe9ff'; for (const r of ROOMS) bc.fillText(r.name, (r.x + r.w / 2) * bs, (r.y + r.h / 2) * bs);
-  bc.fillStyle = '#ffe066'; for (const t of S.myTasks) if (!t.done) { const s = STATIONS.find(q => q.id === t.id); bc.beginPath(); bc.arc(s.x * bs, s.y * bs, 5, 0, 6.3); bc.fill(); }
-  if (S.loc) { bc.strokeStyle = '#ffd23d'; bc.lineWidth = 3; bc.beginPath(); bc.arc(S.loc[0] * bs, S.loc[1] * bs, 11, 0, 6.3); bc.stroke(); bc.fillStyle = '#ffd23d'; bc.fillText(S.roster.get(S.loc[2])?.name || '?', S.loc[0] * bs, S.loc[1] * bs - 16); }
-  bc.fillStyle = '#fff'; bc.beginPath(); bc.arc(S.me.x * bs, S.me.y * bs, 6, 0, 6.3); bc.fill();
+  bc.fillStyle = '#ffe066'; for (const t2 of S.myTasks) if (!t2.done) { const s = STATIONS.find(q => q.id === t2.id); bc.beginPath(); bc.arc(s.x * bs, s.y * bs, 5, 0, 6.3); bc.fill(); }
+  if (!inM && S.loc) { bc.strokeStyle = '#ffd23d'; bc.lineWidth = 3; bc.beginPath(); bc.arc(S.loc[0] * bs, S.loc[1] * bs, 11, 0, 6.3); bc.stroke(); bc.fillStyle = '#ffd23d'; bc.fillText(S.roster.get(S.loc[2])?.name || '?', S.loc[0] * bs, S.loc[1] * bs - 16); }
+  if (inM && S.meetBody) { const x = S.meetBody.x * bs, y = S.meetBody.y * bs; bc.strokeStyle = '#ff4f6d'; bc.lineWidth = 4; bc.beginPath(); bc.moveTo(x - 8, y - 8); bc.lineTo(x + 8, y + 8); bc.moveTo(x + 8, y - 8); bc.lineTo(x - 8, y + 8); bc.stroke(); bc.fillStyle = '#ff4f6d'; bc.font = '800 14px sans-serif'; bc.fillText('Corpo encontrado', x, y - 14); }
+  const px = pos.x * bs, py = pos.y * bs; if (inM) { bc.strokeStyle = 'rgba(255,255,255,.75)'; bc.lineWidth = 3; bc.beginPath(); bc.arc(px, py, 11 + 5 * Math.sin(t * 4), 0, 6.3); bc.stroke(); }
+  bc.fillStyle = '#fff'; bc.beginPath(); bc.arc(px, py, 6, 0, 6.3); bc.fill(); if (inM) { bc.font = '800 15px sans-serif'; bc.fillText('Você parou aqui', px, py - 22); }
 }
 S.nameColor = p => (p.me ? JOB[S.job]?.color : S.known.has(p.id) ? JOB[S.known.get(p.id)].color : null);
 S.tagOf = p => (!p.me && S.known.has(p.id) ? JOB[S.known.get(p.id)].name : null);
@@ -299,8 +303,10 @@ $('cExit').onclick = () => send({ t: 'ab', a: 'camOff' });
 net.on('camOff', () => { S.cams = null; $('camUI').classList.add('hide'); $('hud').classList.remove('incam'); UI.toast('Câmeras fora do ar.'); });
 // ---------- animação de morte e controles de toque (celular) ----------
 net.on('kanim', m => { const k = m.k != null ? S.roster.get(m.k)?.look : null, v = S.roster.get(m.v)?.look; if (v) UI.killScene(k || null, v, m.r); });
-S.touch = matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && innerWidth < 1100); document.body.classList.toggle('touch', S.touch);
-addEventListener('touchstart', () => { S.touch = true; document.body.classList.add('touch'); }, { once: true, passive: true });
+const autoDev = matchMedia('(pointer: coarse)').matches ? 'mobile' : 'pc';
+function applyDevice(dev, persist = true) { if (persist) { P.device = dev; save(); } S.touch = dev === 'mobile'; document.body.classList.toggle('touch', S.touch); document.body.classList.toggle('pc', !S.touch); }
+applyDevice(P.device || autoDev, false);
+document.querySelectorAll('[data-dev]').forEach(b => { if (b.dataset.dev === autoDev) b.textContent += '  (recomendado)'; b.onclick = () => { applyDevice(b.dataset.dev); go('menu'); }; });
 const zone = $('joyZone'), jbase = $('joyBase'), jknob = $('joyKnob'); let jp = null, jo = { x: 0, y: 0 };
 function moveJoy(e) {
   let dx = e.clientX - jo.x, dy = e.clientY - jo.y; const R = 56, l = Math.hypot(dx, dy) || 1; if (l > R) { dx = dx / l * R; dy = dy / l * R; }
@@ -312,6 +318,7 @@ zone.addEventListener('pointermove', e => { if (e.pointerId === jp) moveJoy(e); 
 zone.addEventListener('pointerup', endJoy); zone.addEventListener('pointercancel', endJoy);
 let lastJoyShow = null, lastIngame = null;
 function touchUi() {
+  if (S.phase !== 'play' && !big.classList.contains('hide')) drawBig();
   const show = S.touch && S.phase === 'play' && !closeTask && !S.cams && performance.now() >= S.introEnd;
   if (show !== lastJoyShow) { lastJoyShow = show; zone.classList.toggle('hide', !show); if (!show && jp !== null) endJoy({ pointerId: jp }); }
   const ing = S.phase === 'play'; if (ing !== lastIngame) { lastIngame = ing; document.body.classList.toggle('ingame', ing); }
@@ -319,10 +326,15 @@ function touchUi() {
 $('bFull').onclick = () => { const d = document.documentElement; (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d); screen.orientation?.lock?.('landscape').catch(() => { }); };
 $('bNext').onclick = () => send({ t: 'vent', a: 'next' });
 $('mapbox').onclick = () => toggleMap(); $('hTasks').onclick = () => $('hTasks').classList.toggle('open');
+// ---------- mapa durante a votação, mortos conhecidos ----------
+net.on('meeting', m => { for (const id of m.dead) S.deadKnown.add(id); S.meetPos = { x: S.me.x, y: S.me.y }; S.meetBody = m.bpos ? { x: m.bpos[0], y: m.bpos[1] } : null; });
+net.on('result', m => { if (m.ejected != null) S.deadKnown.add(m.ejected); big.classList.add('hide'); });
+for (const t of ['panel', 'jobpanel']) net.on(t, m => m.list.forEach(r => { if (!r[r.length - 1]) S.deadKnown.add(r[0]); }));
+$('mMap').onclick = () => { big.classList.toggle('hide'); if (!big.classList.contains('hide')) drawBig(); };
 net.on('hint', m => UI.toast(m.text, 7000));
 net.on('unlock', () => { S.jobPanel = true; UI.toast('Painel de profissões desbloqueado! Abra-o durante as reuniões.', 6000); sfx('ok'); });
-net.on('jobpanel', m => UI.pick('Painel de profissões', m.list.map(([id, job, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: `${JOB[job].name} · ${al ? 'VIVO' : 'MORTO'}` })), null));
-net.on('panel', m => UI.pick('Painel do Cientista', m.list.map(([id, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: al ? 'VIVO' : 'MORTO' })), null));
+net.on('jobpanel', m => UI.pick('Painel de profissões', m.list.map(([id, job, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: `${JOB[job].name} · ${al ? 'VIVO' : 'MORTO'}`, dead: !al })), null));
+net.on('panel', m => UI.pick('Painel do Cientista', m.list.map(([id, al]) => ({ id, name: S.roster.get(id)?.name || '?', look: S.roster.get(id)?.look || P.look, note: al ? 'VIVO' : 'MORTO', dead: !al })), null));
 net.on('reveal', m => { for (const [id, j] of m.list) S.known.set(id, j); UI.toast(m.all ? 'Todas as profissões foram reveladas!' : `Descoberto: ${S.roster.get(m.list[0][0])?.name} é ${JOB[m.list[0][1]].name}.`, 6000); sfx('ok'); });
 net.on('shield', m => { UI.toast(`Um Anjo protege você por ${m.dur}s!`, 5000); sfx('fixed'); });
 net.on('infmsg', m => { UI.toast(m.text, 8000); sfx('report'); });
@@ -330,3 +342,4 @@ net.on('ghost', m => { S.ghostJob = m.job; S._ej = null; buildAbil(); UI.toast(`
 net.on('sup', m => { S.sup = m.left; if (m.fresh) UI.toast('Voto Supremo desbloqueado! Use-o na votação.', 5000); });
 requestAnimationFrame(frame);
 go('menu');
+if (!P.device) go('device');

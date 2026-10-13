@@ -60,13 +60,14 @@ export function initCustom(look, onSave) {
 export function drawPrev() { const cv = $('prev'), c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); if (draft) drawCrew(c, draft, 170, 250, { t: performance.now() / 1000, s: 3.2 }); }
 
 // ---------- configurações ----------
-export function initSettings(P, save) {
+export function initSettings(P, save, onDevice) {
   const box = $('sOpts'); box.innerHTML = '';
   for (const [k, label] of [['master', 'Volume geral'], ['music', 'Música'], ['sfx', 'Efeitos']]) {
     const w = el('div', 'set'); w.append(el('span', null, label)); const r = el('input'); r.type = 'range'; r.min = 0; r.max = 1; r.step = 0.05; r.value = A.vol[k]; r.oninput = () => { setVol(k, +r.value); P.vol = { ...A.vol }; save(); }; w.append(r); box.append(w);
   }
   const q = el('div', 'set'); q.append(el('span', null, 'Qualidade gráfica')); const s = el('select'); ['Baixa', 'Média', 'Alta'].forEach((n, i) => { const o = el('option', null, n); o.value = i; s.append(o); }); s.value = P.q; s.onchange = () => { P.q = +s.value; setQuality(P.q); save(); }; q.append(s); box.append(q);
   const ar = el('div', 'set'); ar.append(el('span', null, 'Setas de tarefas')); const sa = el('select'); ['Todas', '3 mais próximas', 'Desligadas'].forEach((n, i) => { const o = el('option', null, n); o.value = i; sa.append(o); }); sa.value = P.arr || 0; sa.onchange = () => { P.arr = +sa.value; save(); }; ar.append(sa); box.append(ar);
+  const dv = el('div', 'set'); dv.append(el('span', null, 'Dispositivo')); const sd = el('select'); [['pc', 'Computador'], ['mobile', 'Celular']].forEach(([v, n]) => { const o = el('option', null, n); o.value = v; sd.append(o); }); sd.value = P.device || 'pc'; sd.onchange = () => onDevice && onDevice(sd.value); dv.append(sd); box.append(dv);
   const f = el('button', 'btn', 'TELA CHEIA'); f.onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); box.append(f);
 }
 
@@ -85,7 +86,7 @@ export function openMeeting(m, ctx) {
     M.cards.set(id, card); list.append(card);
   }
   $('mVote').disabled = true; $('mSkip').disabled = true;
-  $('mNote').textContent = ctx.alive ? 'Discussão: converse e levante suspeitas.' : 'Você é um fantasma: só outros fantasmas veem seu chat.';
+  $('mNote').textContent = ctx.alive ? 'Discussão: converse e levante suspeitas.' : 'Você é um fantasma: lê o chat dos vivos, mas só outros fantasmas leem o seu.';
   clearInterval(M.iv); M.iv = setInterval(() => { $('mBar').style.transform = `scaleX(${Math.max(0, 1 - (performance.now() - M.t0) / M.dur)})`; }, 100);
 }
 export function startVote(time) {
@@ -152,7 +153,13 @@ export function renderJobs(L, myId, send) {
 // ---------- seleção de jogador / mensagem / painel ----------
 export function pick(title, items, cb) {
   const p = $('pick'), l = $('pkL'); $('pkT').textContent = title; l.innerHTML = '';
-  for (const it of items) { const b = el('button', 'pk'), cv = el('canvas'); cv.width = 44; cv.height = 52; drawCrew(cv.getContext('2d'), it.look, 22, 46, { s: 0.9 }); b.append(cv, el('span', null, it.name + (it.note ? ' — ' + it.note : ''))); if (cb) b.onclick = () => { p.classList.remove('on'); sfx('click'); cb(it.id); }; else b.disabled = true; l.append(b); }
+  for (const it of items) {
+    const b = el('button', 'pk' + (it.dead ? ' dead' : '')), cv = el('canvas'); cv.width = 44; cv.height = 52;
+    drawCrew(cv.getContext('2d'), it.look, 22, 46, { s: 0.9, ghost: !!it.dead, dead: !!it.dead, alpha: it.dead ? 0.6 : 1 });
+    b.append(cv, el('span', null, (it.dead ? '✕ ' : '') + it.name + (it.note ? ' — ' + it.note : '')));
+    if (cb && !it.dead) b.onclick = () => { p.classList.remove('on'); sfx('click'); cb(it.id); }; else b.disabled = true;
+    l.append(b);
+  }
   $('pkX').onclick = () => p.classList.remove('on'); p.classList.add('on');
 }
 export function pickText(title, opts, cb) {

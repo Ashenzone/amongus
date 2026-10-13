@@ -31,6 +31,12 @@ O host configura no lobby (botão PROFISSÕES): chance e máximo de cada profiss
 ## Mentalista
 Tem dois painéis: **PAINEL** (igual ao do Cientista: vivo/morto, usos por reunião) e **PROFISSÕES** (desbloqueia ao completar todas as tarefas; mostra nome, profissão e vivo/morto de todos; só abre durante as reuniões). A sondagem individual continua revelando a profissão de quem ficar parado.
 
+## Dispositivo
+Na primeira vez o jogo pergunta se você joga no **Celular** ou no **Computador** (dá para trocar em Configurações). Computador usa teclado e layout compacto/centralizado; Celular usa joystick e botões de toque.
+
+## Votação
+Botão **🗺 MAPA** na reunião mostra onde você parou, o corpo encontrado e suas tarefas pendentes. Mortos veem o chat dos vivos; vivos não veem o chat dos mortos. A animação de morte aparece só para quem morreu. Painéis de seleção/Cientista/Mentalista marcam mortos com ✕.
+
 ## Celular
 Joystick flutuante (metade esquerda da tela), botões grandes à direita (USAR, REPORTAR, ELIMINAR, DUTO/PRÓXIMO, SABOTAR e habilidades), HUD compacto (toque na barra de tarefas para ver a lista; toque no minimapa para o mapa grande), botão de tela cheia e aviso para girar o aparelho. Reunião, lobby, menus e minigames são responsivos. Use o celular na horizontal.
 
